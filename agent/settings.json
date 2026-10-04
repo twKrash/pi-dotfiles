@@ -1,0 +1,52 @@
+{
+  "packages": [
+    "npm:@narumitw/pi-usage",
+    "npm:pi-lens",
+    "npm:pi-web-access",
+    "npm:@gotgenes/pi-permission-system",
+    "git:github.com/obra/superpowers",
+    "npm:@andrewjacop/pi-herdr",
+    "npm:pi-pr-review",
+    "npm:@yofriadi/pi-toon",
+    "npm:context-mode",
+    "git:github.com/DietrichGebert/ponytail",
+    "npm:@narumitw/pi-goal",
+    "npm:@juicesharp/rpiv-todo",
+    "git:github.com/jonjonrankin/pi-caveman",
+    "npm:pi-rtk-optimizer",
+    "npm:pi-tool-stats",
+    "npm:@twkrash/pi-session-inspector@1.5.3",
+    "npm:pi-jev",
+    "npm:pi-open-tui",
+    "git:github.com/nicobailon/pi-subagents"
+  ],
+  "subagents": {
+    "agentOverrides": {
+      "delegate": { "thinking": "low" },
+      "scout": {
+        "thinking": "low",
+        "acceptanceRole": "read-only",
+        "inheritSkills": false,
+        "skills": ["graphify"]
+      },
+      "worker": {
+        "thinking": "medium",
+        "acceptanceRole": "writer",
+        "inheritSkills": false,
+        "skills": ["graphify", "ponytail"]
+      },
+      "reviewer": {
+        "thinking": "high",
+        "acceptanceRole": "read-only",
+        "inheritSkills": false,
+        "skills": ["graphify", "ponytail-review"]
+      },
+      "oracle": {
+        "thinking": "high",
+        "acceptanceRole": "read-only",
+        "inheritSkills": false,
+        "skills": ["graphify"]
+      }
+    }
+  }
+}

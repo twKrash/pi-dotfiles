@@ -1,0 +1,4 @@
+.DS_Store
+*.pi-dotfiles-new
+*.pi-dotfiles-bak.*
+node_modules/

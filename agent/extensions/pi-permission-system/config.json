@@ -1,0 +1,50 @@
+{
+  "debugLog": false,
+  "permissionReviewLog": false,
+  "permission": {
+    "*": "allow",
+    "path": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "read": "allow",
+    "grep": "allow",
+    "find": "allow",
+    "ls": "allow",
+    "bash": {
+      "*": "ask",
+      "rm -rf *": "deny",
+      "sudo *": "ask",
+      "git push *": "ask",
+      "git push": "ask",
+      "git reset --hard": "ask",
+      "git reset --hard *": "ask",
+      "git clean -f": "ask",
+      "git clean -d -f*": "ask",
+      "git clean -fd*": "ask"
+    },
+    "external_directory": {
+      "*": "ask"
+    },
+    "external_directory_read": {
+      "~/.herdr/*": "allow",
+      "~/.pi/agent/skills/*": "allow",
+      "~/.pi/agent/AGENTS.md": "allow",
+      "~/.pi/agent/MEMORY.md": "allow",
+      "~/.agents/*": "allow",
+      "~/.codex/plugins/*": "allow"
+    },
+    "external_directory_write": {
+      "~/.herdr/*": "allow",
+      "~/.pi/tmp/*": "allow",
+      "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
+      "~/.pi/agent/MEMORY.md": "allow"
+    },
+    "skill": {
+      "*": "allow",
+      "graphify": "allow"
+    }
+  }
+}

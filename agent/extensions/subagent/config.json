@@ -1,0 +1,32 @@
+{
+  "toolActivation": "auto",
+  "toolDescriptionMode": "compact",
+  "inlineToolDisplay": "summary",
+
+  "defaultSubagentContext": "fresh",
+
+  "globalConcurrencyLimit": 4,
+  "maxSubagentSpawnsPerSession": 48,
+  "maxSubagentSpawnsPerRun": 24,
+  "maxActiveAsyncRunsPerSession": 4,
+
+  "parallel": {
+    "maxTasks": 6,
+    "concurrency": 3
+  },
+
+  "maxSubagentDepth": 1,
+
+  "asyncByDefault": false,
+  "timeout": 7200000,
+  "waitTool": {
+    "enabled": true,
+    "defaultTimeoutMs": 3600000
+  },
+  "scheduledRuns": {
+    "enabled": false
+  },
+
+  "fleetView": true,
+  "resultScanLogging": "off"
+}
