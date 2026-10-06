@@ -1,0 +1,26 @@
+{
+  "subagents": {
+    "agentOverrides": {
+      "delegate": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "low"
+      },
+      "scout": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "low"
+      },
+      "worker": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "medium"
+      },
+      "reviewer": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "high"
+      },
+      "oracle": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "high"
+      }
+    }
+  }
+}

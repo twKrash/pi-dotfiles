@@ -9,11 +9,13 @@ git clone https://github.com/twKrash/pi-dotfiles.git
 cd pi-dotfiles
 ./scripts/setup.sh --dry-run
 ./scripts/setup.sh
+./scripts/setup.sh --provider=claude
+./scripts/setup.sh --provider=codex
 ```
 
 The target defaults to `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use another Pi agent directory. `setup.sh` uses POSIX `/bin/sh` and Node.js (already required by Pi).
 
-- `settings.json`: merges package sources and portable subagent role defaults; keeps other settings and existing package entries.
+- `settings.json`: merges package sources and portable subagent role defaults; keeps other settings and existing package entries. `--provider=codex|claude` selects model/thinking defaults for subagents; explicit selection replaces only those fields, preserving local tool allowlists and other role settings. Claude profile adds `npm:pi-claude-agent-sdk` (setup does not install packages).
 - `mcp.json`: adds Context7 only; preserves other MCP servers. A conflicting local Context7 entry is kept unless `--force` is used.
 - Managed files: new files are copied; differing files are preserved and staged beside the target as `.pi-dotfiles-new`.
 - `MEMORY.md`: created from the empty template only when absent. Existing memory is never overwritten.
@@ -27,16 +29,21 @@ To update configs after fetching repository changes:
 git pull --ff-only
 ./scripts/setup.sh --dry-run
 ./scripts/setup.sh
+./scripts/setup.sh --provider=claude
+./scripts/setup.sh --provider=codex
 ```
 
 ## Included config
 
 - `agent/AGENTS.md`: general user-level Pi instructions.
 - `agent/MEMORY.md.template`: headings only; no personal memory content.
-- `agent/settings.json`: package list and portable `pi-subagents` role defaults. Local model IDs and filesystem paths are omitted.
+- `agent/settings.json`: package list and portable `pi-subagents` role defaults. Provider model IDs live in opt-in `agent/providers/` profiles.
 - `agent/mcp.json`: Context7 endpoint only; personal MCP headers are excluded.
 - `agent/extensions/`: permission-system, RTK optimizer, and subagent settings.
+- `agent/providers/`: opt-in `codex` and `claude` subagent model profiles.
 - `agent/skills/graphify/`: Graphify skill and references, with upstream MIT notice in `third_party/licenses/`.
+
+Provider profiles set scout to a low-cost model, worker to a mid-tier model, reviewer to Opus 5.5 at medium effort, and oracle to Opus 5.5 at high effort for Claude. Use per-run thinking overrides for oracle `xhigh` when task warrants it. No provider option leaves existing models untouched.
 
 The package list follows the currently selected npm/Git extensions. `pi-session-inspector` uses its published package (`@twkrash/pi-session-inspector@1.5.3`), not a development checkout. Pi packages can execute code; review them before installing.
 

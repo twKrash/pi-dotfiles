@@ -36,4 +36,50 @@ if (!m.mcpServers.local) throw new Error('unrelated MCP config overwritten');
 NODE
 grep -q 'CONFLICT' "$TMP/update.log"
 test -f "$AGENT/extensions/pi-permission-system/config.json.pi-dotfiles-new"
+
+# Explicit Claude profile updates only model and thinking; existing tool limits stay.
+CLAUDE_AGENT="$TMP/claude-agent"
+mkdir -p "$CLAUDE_AGENT"
+node - "$CLAUDE_AGENT/settings.json" <<'NODE'
+const fs = require('fs');
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  packages: ['npm:custom-package'],
+  defaultProvider: 'keep-provider',
+  defaultModel: 'keep-model',
+  subagents: {agentOverrides: {
+    scout: {model: 'local/old', thinking: 'high', tools: ['read', 'grep']},
+    worker: {tools: ['read', 'edit', 'write']}
+  }}
+}));
+NODE
+PI_CODING_AGENT_DIR="$CLAUDE_AGENT" "$ROOT/scripts/setup.sh" --provider=claude >"$TMP/claude.log"
+node - "$CLAUDE_AGENT/settings.json" <<'NODE'
+const fs = require('fs');
+const s = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const roles = s.subagents.agentOverrides;
+if (!s.packages.includes('npm:custom-package')) throw new Error('custom package removed');
+if (!s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK package missing');
+if (s.defaultProvider !== 'keep-provider' || s.defaultModel !== 'keep-model') throw new Error('main model defaults changed');
+if (roles.scout.model !== 'claude-bridge/claude-haiku-4-5' || roles.scout.thinking !== 'low') throw new Error('Claude scout profile missing');
+if (roles.worker.model !== 'claude-bridge/claude-sonnet-5-5' || roles.worker.thinking !== 'medium') throw new Error('Claude worker profile missing');
+if (roles.reviewer.model !== 'claude-bridge/claude-opus-5-5' || roles.reviewer.thinking !== 'medium') throw new Error('Claude reviewer profile missing');
+if (roles.oracle.model !== 'claude-bridge/claude-opus-5-5' || roles.oracle.thinking !== 'high') throw new Error('Claude oracle profile missing');
+if (JSON.stringify(roles.scout.tools) !== JSON.stringify(['read', 'grep'])) throw new Error('scout tools changed');
+if (JSON.stringify(roles.worker.tools) !== JSON.stringify(['read', 'edit', 'write'])) throw new Error('worker tools changed');
+NODE
+if PI_CODING_AGENT_DIR="$CLAUDE_AGENT" "$ROOT/scripts/setup.sh" --provider=unknown >"$TMP/invalid.log" 2>&1; then
+  echo 'unknown provider unexpectedly accepted' >&2
+  exit 1
+fi
+grep -q 'Unsupported provider' "$TMP/invalid.log"
+CODEX_AGENT="$TMP/codex-agent"
+PI_CODING_AGENT_DIR="$CODEX_AGENT" "$ROOT/scripts/setup.sh" --provider=codex >"$TMP/codex.log"
+node - "$CODEX_AGENT/settings.json" <<'NODE'
+const fs = require('fs');
+const s = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const roles = s.subagents.agentOverrides;
+if (roles.scout.model !== 'openai-codex/gpt-6-luna') throw new Error('Codex scout profile missing');
+if (roles.oracle.model !== 'openai-codex/gpt-6.1-sol') throw new Error('Codex oracle profile missing');
+if (s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK added to Codex profile');
+NODE
 printf 'setup tests passed\n'

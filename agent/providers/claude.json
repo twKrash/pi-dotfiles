@@ -1,0 +1,29 @@
+{
+  "packages": [
+    "npm:pi-claude-agent-sdk"
+  ],
+  "subagents": {
+    "agentOverrides": {
+      "delegate": {
+        "model": "claude-bridge/claude-sonnet-5-5",
+        "thinking": "low"
+      },
+      "scout": {
+        "model": "claude-bridge/claude-haiku-4-5",
+        "thinking": "low"
+      },
+      "worker": {
+        "model": "claude-bridge/claude-sonnet-5-5",
+        "thinking": "medium"
+      },
+      "reviewer": {
+        "model": "claude-bridge/claude-opus-5-5",
+        "thinking": "medium"
+      },
+      "oracle": {
+        "model": "claude-bridge/claude-opus-5-5",
+        "thinking": "high"
+      }
+    }
+  }
+}

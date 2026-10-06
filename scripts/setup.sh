@@ -5,18 +5,26 @@ ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 AGENT_DIR=${PI_CODING_AGENT_DIR:-"$HOME/.pi/agent"}
 DRY_RUN=0
 FORCE=0
+PROVIDER=
 for arg do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --force) FORCE=1 ;;
-    -h|--help) printf 'Usage: %s [--dry-run] [--force]\n' "$0"; exit 0 ;;
+    --provider=*)
+      PROVIDER=${arg#*=}
+      case "$PROVIDER" in
+        codex|claude) ;;
+        *) printf 'Unsupported provider: %s (choose codex or claude)\n' "$PROVIDER" >&2; exit 2 ;;
+      esac
+      ;;
+    -h|--help) printf 'Usage: %s [--dry-run] [--force] [--provider=codex|claude]\n' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
 
 run_merge() {
-  kind=$1 src=$2 dst=$3
-  if PI_DOTFILES_DRY_RUN=$DRY_RUN PI_DOTFILES_FORCE=$FORCE node "$ROOT/scripts/merge-json.mjs" "$kind" "$src" "$dst"; then
+  kind=$1 src=$2 dst=$3 profile=${4:-}
+  if PI_DOTFILES_DRY_RUN=$DRY_RUN PI_DOTFILES_FORCE=$FORCE node "$ROOT/scripts/merge-json.mjs" "$kind" "$src" "$dst" "$profile"; then
     return 0
   else
     result=$?
@@ -24,7 +32,9 @@ run_merge() {
   fi
 }
 
-run_merge settings "$ROOT/agent/settings.json" "$AGENT_DIR/settings.json"
+PROFILE=
+[ -z "$PROVIDER" ] || PROFILE="$ROOT/agent/providers/$PROVIDER.json"
+run_merge settings "$ROOT/agent/settings.json" "$AGENT_DIR/settings.json" "$PROFILE"
 run_merge mcp "$ROOT/agent/mcp.json" "$AGENT_DIR/mcp.json"
 
 copy_one() {
