@@ -80,7 +80,30 @@ copy_tree() {
   done
 }
 
+copy_one "$ROOT/bin/prompt-opt" "$HOME/.local/bin/prompt-opt"
+copy_one "$ROOT/bin/prompt-opt-history.mjs" "$HOME/.local/bin/prompt-opt-history.mjs"
+copy_tree "$ROOT/prompt_engineering" "$HOME/ai/prompt_engineering"
 copy_one "$ROOT/agent/AGENTS.md" "$AGENT_DIR/AGENTS.md"
 copy_one "$ROOT/agent/MEMORY.md.template" "$AGENT_DIR/MEMORY.md" yes
 copy_tree "$ROOT/agent/extensions" "$AGENT_DIR/extensions"
 copy_tree "$ROOT/agent/skills" "$AGENT_DIR/skills"
+
+skill_tmp=$(mktemp)
+trap 'rm -f "$skill_tmp"' EXIT HUP INT TERM
+{
+  cat <<'SKILL_HEADER'
+---
+name: prompt-engineering
+description: Model-aware prompt creation, optimization, review, comparison, and explanation; use when working with prompts.
+---
+
+SKILL_HEADER
+  cat "$ROOT/prompt_engineering/AGENTS.md"
+} >"$skill_tmp"
+chmod 644 "$skill_tmp"
+copy_one "$skill_tmp" "$AGENT_DIR/skills/prompt-engineering/SKILL.md"
+rm -f "$skill_tmp"
+trap - EXIT HUP INT TERM
+for file in prompt_engineering.md prompting-references.md prompt-optimization-playbook.md; do
+  copy_one "$ROOT/prompt_engineering/$file" "$AGENT_DIR/skills/prompt-engineering/references/$file"
+done
