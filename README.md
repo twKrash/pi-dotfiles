@@ -15,7 +15,7 @@ cd pi-dotfiles
 
 The Pi agent target defaults to `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use another Pi agent directory. Setup also installs `prompt-opt` under `~/.local/bin`, and prompt-engineering lab files under `~/ai/prompt_engineering` (the CLI default; set `PROMPT_LAB_DIR` to override at runtime). `setup.sh` uses POSIX `/bin/sh` and Node.js (already required by Pi). Keep `~/.local/bin` on `PATH`.
 
-- `bin/prompt-opt`: standalone Bash prompt optimizer; requires Pi, an editor for interactive input, and `xclip` for clipboard copy.
+- `bin/prompt-opt`: standalone Bash prompt optimizer; requires Pi, an editor for interactive input, and `xclip` or `pbcopy` for clipboard copy (`pbcopy` supports macOS).
 - `agent/extensions/prompt-opt-pi.js`: registers the `/prompt-opt` Pi command and invokes the standalone CLI by name, so its install location must be on `PATH`.
 - `prompt_engineering/`: canonical prompt-engineering instruction, playbook, and references installed into `~/ai/prompt_engineering`. Setup generates the Pi skill `SKILL.md` from `AGENTS.md` plus Pi metadata and copies reference files from this same source; existing files are preserved and staged as `.pi-dotfiles-new` on conflict.
 - `settings.json`: merges package sources and portable subagent role defaults; keeps other settings and existing package entries. `--provider=codex|claude` selects model/thinking defaults for subagents; explicit selection replaces only those fields, preserving local tool allowlists and other role settings. Claude profile adds `npm:pi-claude-agent-sdk` (setup does not install packages).
@@ -28,7 +28,7 @@ Review staged `.pi-dotfiles-new` files before applying them. The script does not
 
 ### Prompt optimizer
 
-Run `prompt-opt` for interactive prompt editing or pass a task file/stdin. Use `/prompt-opt` inside Pi to insert optimized output into the editor. Use `prompt-opt --history` to list recorded request hashes and `prompt-opt --history HASH` (or `/prompt-opt --history=HASH`) to display original and optimized prompts. `--no-cache` forces another run while preserving prior records. Cache identity includes the exact request bytes, seven resolved settings, prompt-lab files, Pi version, and contract revision; ambient Pi/ancestor context is not fingerprinted. Legacy results remain visible as unverified. Add `--debug` (alias `--verbose`) to log phase timings; the extension records metadata-only `prompt-opt-debug` entries in the current session. Run `prompt-opt --help` for options. The command needs `~/.local/bin` on `PATH`; clipboard copy uses `xclip`.
+Run `prompt-opt` for interactive prompt editing or pass a task file/stdin. Use `/prompt-opt` inside Pi to insert optimized output into the editor. Use `prompt-opt --history` to list recorded request hashes and `prompt-opt --history HASH` (or `/prompt-opt --history=HASH`) to display original and optimized prompts. `--no-cache` forces another run while preserving prior records. Cache identity includes the exact request bytes, seven resolved settings, prompt-lab files, Pi version, and contract revision; ambient Pi/ancestor context is not fingerprinted. Legacy results remain visible as unverified. Add `--debug` (alias `--verbose`) to log phase timings; the extension records metadata-only `prompt-opt-debug` entries in the current session. Run `prompt-opt --help` for options. The command needs `~/.local/bin` on `PATH`; clipboard copy uses `xclip` when available, otherwise `pbcopy`.
 
 To update configs after fetching repository changes:
 
