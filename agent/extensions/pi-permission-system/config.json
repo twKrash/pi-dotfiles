@@ -1,12 +1,12 @@
 {
-  "debugLog": false,
-  "permissionReviewLog": false,
+  "debugLog": true,
+  "permissionReviewLog": true,
   "permission": {
     "*": "allow",
     "path": {
       "*": "allow",
       "*.env": "deny",
-      "*.env.*": "deny",
+      "*.env.*": "allow",
       "*.env.example": "allow"
     },
     "read": "allow",
@@ -14,8 +14,8 @@
     "find": "allow",
     "ls": "allow",
     "bash": {
-      "*": "ask",
-      "rm -rf *": "deny",
+      "*": "allow",
+      "rm -rf *": "ask",
       "sudo *": "ask",
       "git push *": "ask",
       "git push": "ask",
@@ -25,21 +25,44 @@
       "git clean -d -f*": "ask",
       "git clean -fd*": "ask"
     },
+
     "external_directory": {
-      "*": "ask"
-    },
-    "external_directory_read": {
-      "~/.herdr/*": "allow",
+      "*": "ask",
+      "~/.pi/agent/git/github.com/*": "allow",
+      "~/.pi/agent/npm/node_modules/*/skills/*": "allow",
+      "~/.pi/agent/npm/node_modules/pi-subagents/*": "allow",
+      "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
       "~/.pi/agent/skills/*": "allow",
+      "~/.pi/agent/session-inspector/*": "allow",
+      "~/.herdr/*": "allow",
+      "~/code/*": "allow",
+      "~/code": "allow",
+      "/tmp/*": "allow",
+      "/tmp": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
       "~/.pi/agent/MEMORY.md": "allow",
+      "~/pi": "allow"
+    },
+
+    "external_directory_read": {
+      "~/code/*": "allow",
+      "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
+      "/home/dvory/.local/share/*": "allow",
+      "~/.pi/*": "allow",
+      "/tmp/*": "allow",
+      "~/.herdr/*": "allow",
       "~/.agents/*": "allow",
-      "~/.codex/plugins/*": "allow"
+      "~/.codex/plugins/*": "allow",
+      "~/.pi/agent/AGENTS.md": "allow",
+      "~/.pi/agent/MEMORY.md": "allow"
     },
     "external_directory_write": {
+      "/tmp/*": "allow",
+      "~/code/*": "allow",
       "~/.herdr/*": "allow",
-      "~/.pi/tmp/*": "allow",
+      "~/.cache/graphify-queries.log": "allow",
       "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
+      "~/.pi/tmp/*": "allow",
       "~/.pi/agent/MEMORY.md": "allow"
     },
     "skill": {

@@ -5,11 +5,14 @@ ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 AGENT_DIR=${PI_CODING_AGENT_DIR:-"$HOME/.pi/agent"}
 DRY_RUN=0
 FORCE=0
+INTERACTIVE=0
+exec 3<&0
 PROVIDER=
 for arg do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --force) FORCE=1 ;;
+    --interactive) INTERACTIVE=1 ;;
     --provider=*)
       PROVIDER=${arg#*=}
       case "$PROVIDER" in
@@ -17,7 +20,7 @@ for arg do
         *) printf 'Unsupported provider: %s (choose codex or claude)\n' "$PROVIDER" >&2; exit 2 ;;
       esac
       ;;
-    -h|--help) printf 'Usage: %s [--dry-run] [--force] [--provider=codex|claude]\n' "$0"; exit 0 ;;
+    -h|--help) printf 'Usage: %s [--dry-run] [--force] [--interactive] [--provider=codex|claude]\n' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -52,12 +55,39 @@ copy_one() {
     return
   fi
   if [ -e "$target" ] && [ "$FORCE" -ne 1 ]; then
-    printf 'CONFLICT preserved %s; candidate: %s.pi-dotfiles-new\n' "$target" "$target"
-    if [ "$DRY_RUN" -eq 0 ]; then
-      candidate="$target.pi-dotfiles-new"
-      if [ ! -L "$candidate" ]; then cp "$src" "$candidate"; fi
+    candidate="$target.pi-dotfiles-new"
+    if [ "$INTERACTIVE" -eq 1 ]; then
+      printf 'Conflict: %s\n  [u] update from repo (backup local)\n  [k] keep local and stage repo candidate\n  [s] skip\nChoice [s]: ' "$target" >&2
+      IFS= read -r choice <&3 || { printf '\nNo choice received; preserving %s\n' "$target" >&2; return; }
+      case "$choice" in
+        u|U) ;;
+        k|K)
+          printf 'KEEP %s; candidate: %s\n' "$target" "$candidate"
+          if [ "$DRY_RUN" -eq 0 ]; then
+            if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+              printf 'CANDIDATE preserved %s\n' "$candidate"
+            else
+              cp "$src" "$candidate"
+            fi
+          fi
+          return
+          ;;
+        *)
+          printf 'SKIP %s\n' "$target"
+          return
+          ;;
+      esac
+    else
+      printf 'CONFLICT preserved %s; candidate: %s.pi-dotfiles-new\n' "$target" "$target"
+      if [ "$DRY_RUN" -eq 0 ]; then
+        if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+          printf 'CANDIDATE preserved %s\n' "$candidate"
+        else
+          cp "$src" "$candidate"
+        fi
+      fi
+      return
     fi
-    return
   fi
   printf '%s %s\n' "$([ "$DRY_RUN" -eq 1 ] && printf 'WOULD COPY' || printf 'COPY')" "$target"
   if [ "$DRY_RUN" -eq 1 ]; then return; fi

@@ -181,16 +181,21 @@ Keep durable project artifacts and secrets out of it, and do not modify unrelate
 
 ## Tool orchestration
 
-- Prefer `codemode` when a step benefits from orchestrating multiple tool calls: parallel fan-out, dependent/chained calls, repeated queries, or filtering/aggregating substantial output.
+- MUST use `codemode` to orchestrate:
+  - two or more independent tool operations (use `Promise.allSettled()` where failures should be isolated);
+  - dependent or chained tool operations;
+  - repeated queries, bulk work, or large outputs that need filtering or summarizing.
+  For these cases, call `codemode` directly rather than splitting work across direct calls or a parallel-tool wrapper.
 - Inside `codemode`, prefer `ctx_*` tools for context-heavy work so raw output remains in the sandbox and only the derived result returns. Typical order of preference:
   `codemode` → `ctx_batch_execute` → `ctx_execute` / `ctx_execute_file` → `ctx_search`.
   This orchestration rule takes precedence over context-mode's standalone tool-selection hierarchy.
-- Use tools directly when:
+- Use tools directly only when:
   - the operation is a single short call;
-  - a couple of simple calls are clearer than scripting them;
-  - performing file mutations with `edit` or `write`;
+  - a tool's contract requires direct invocation (for example, native `subagent`);
+  - performing a single file mutation with `edit` or `write`;
   - the operation must continue after the codemode script exits.
 - Prefer `ctx_batch_execute` for independent or parallel gathering, `ctx_execute` for computation/filtering, `ctx_execute_file` for analyzing file contents without exposing raw data to the parent context, and `ctx_search` for targeted retrieval from already indexed context.
+
 - Do not invoke native `subagent` through `codemode`. Launch `pi-subagents` directly so supervision, progress, lifecycle, and completion semantics remain visible to the parent. `herdr_*` tools may be orchestrated through `codemode` when appropriate.
 
 ## Code Standards
