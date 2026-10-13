@@ -451,6 +451,16 @@ PI_CODING_AGENT_DIR="$AGENT" "$ROOT/scripts/setup.sh" --force >"$TMP/binary-forc
 cmp "$ROOT/bin/prompt-opt" "$BIN"
 test -x "$BIN"
 
+# Interactive conflict choices cover both prompt-opt deployment targets.
+printf '%s\n' 'local prompt-opt' >"$BIN"
+EXT="$AGENT/extensions/prompt-opt-pi.js"
+printf '%s\n' 'local Pi extension' >"$EXT"
+printf 'k\nu\n' | PI_CODING_AGENT_DIR="$AGENT" "$ROOT/scripts/setup.sh" --interactive >"$TMP/interactive.log" 2>"$TMP/interactive-prompts.log"
+test "$(cat "$BIN")" = 'local prompt-opt'
+cmp "$ROOT/bin/prompt-opt" "$BIN.pi-dotfiles-new"
+cmp "$ROOT/agent/extensions/prompt-opt-pi.js" "$EXT"
+grep -q 'local Pi extension' "$EXT".pi-dotfiles-bak.*
+
 # Preserve unrelated user values, merge package additions, and keep local conflicts.
 node - "$AGENT/settings.json" "$AGENT/mcp.json" <<'NODE'
 const fs = require('fs');

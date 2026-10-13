@@ -1,7 +1,10 @@
 {
-  "toolActivation": "auto",
+  "toolActivation": "eager",
   "toolDescriptionMode": "compact",
   "inlineToolDisplay": "summary",
+
+  "pinToolDeclarations": true,
+  "activeRunsPrompt": true,
 
   "defaultSubagentContext": "fresh",
 
@@ -17,8 +20,9 @@
 
   "maxSubagentDepth": 1,
 
-  "asyncByDefault": false,
-  "timeout": 7200000,
+  "asyncByDefault": true,
+  "timeoutMs": 7200000,
+  "checkpointBeforeDeadlineMs": 300000,
   "waitTool": {
     "enabled": true,
     "defaultTimeoutMs": 3600000
