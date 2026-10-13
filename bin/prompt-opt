@@ -21,8 +21,9 @@ usage() {
   FILE / -               Read task from a file / standard input.
 
 Target (the model FOR WHICH the prompt is written):
-  --model=NAME           luna (default), sol, astra, opus-5.5, sonnet-5.5,
-                         haiku-5.5, or an explicit model name.
+  --model=NAME           luna (default), sol (GPT-6.1 Sol), sol-6 (GPT-6 Sol),
+                         sol-6.1, astra, opus-5.5, sonnet-5.5, haiku-5.5,
+                         or an explicit model name.
   --provider=NAME        openai or anthropic (inferred from recognized model).
   --effort=LEVEL         Target reasoning effort (default: high).
   --environment=NAME     Target harness (default: pi).
@@ -146,7 +147,7 @@ fi
 # A model string is allowed to determine a provider family, not credentials.
 infer_family() {
   case "$1" in
-  luna | sol | astra | gpt-* | o1 | o3 | o4*) printf 'openai' ;;
+  luna | sol | sol-6 | sol-6.1 | astra | gpt-* | o1 | o3 | o4*) printf 'openai' ;;
   opus* | sonnet* | haiku* | claude-*) printf 'anthropic' ;;
   *) return 1 ;;
   esac
@@ -154,7 +155,10 @@ infer_family() {
 
 pi_id_for_model() {
   case "$1" in
-  luna | sol | astra) printf 'gpt-6-%s' "$1" ;;
+  luna) printf 'gpt-6-luna' ;;
+  sol | sol-6.1) printf 'gpt-6.1-sol' ;;
+  sol-6) printf 'gpt-6-sol' ;;
+  astra) printf 'gpt-6-astra' ;;
   opus-5.5 | sonnet-5.5 | haiku-5.5)
     local family="${1%%-*}"
     printf 'claude-%s-5-5' "$family"
@@ -177,6 +181,7 @@ default_target_model=luna
 model="${previous[1]:-${PROMPT_OPT_TARGET_MODEL:-$default_target_model}}"
 [[ -z "$arg_model" ]] || model="$arg_model"
 [[ "$model" =~ ^[A-Za-z0-9._/-]+$ ]] || die 'invalid model name'
+case "$model" in sol | sol-6 | sol-6.1) model="$(pi_id_for_model "$model")" ;; esac
 
 provider="${previous[0]:-${PROMPT_OPT_TARGET_PROVIDER:-}}"
 if [[ -n "$arg_model" && -z "$arg_provider" ]]; then provider=''; fi

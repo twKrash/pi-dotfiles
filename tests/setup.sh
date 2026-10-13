@@ -38,6 +38,18 @@ cmp "$TMP/expected-prompt-skill.md" "$AGENT/skills/prompt-engineering/SKILL.md"
 PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/prompt-state" \
   PROMPT_OPT_TARGET_MODEL=opus-5.5 "$ROOT/bin/prompt-opt" --provider=openai --show-config >"$TMP/prompt-config.log"
 grep -q 'Target: *provider=openai model=luna ' "$TMP/prompt-config.log"
+PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/sol-alias-state" \
+  "$ROOT/bin/prompt-opt" --model=sol --show-config >"$TMP/sol-alias-config.log"
+grep -q 'Target: *provider=openai model=gpt-6.1-sol ' "$TMP/sol-alias-config.log"
+PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/sol-6-alias-state" \
+  "$ROOT/bin/prompt-opt" --model=sol-6 --show-config >"$TMP/sol-6-alias-config.log"
+grep -q 'Target: *provider=openai model=gpt-6-sol ' "$TMP/sol-6-alias-config.log"
+PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/sol-6.1-alias-state" \
+  "$ROOT/bin/prompt-opt" --opt-model=sol-6.1 --show-config >"$TMP/sol-6.1-alias-config.log"
+grep -q 'Optimizer: *provider=openai model=gpt-6.1-sol ' "$TMP/sol-6.1-alias-config.log"
+PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/prompt-opt-effort-state" \
+  "$ROOT/bin/prompt-opt" --opt-effort=medium --show-config >"$TMP/prompt-config-opt-effort.log"
+grep -q 'Optimizer: *provider=openai model=gpt-6-luna thinking=medium' "$TMP/prompt-config-opt-effort.log"
 PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/prompt-state-verbose" \
   "$ROOT/bin/prompt-opt" --verbose --show-config >"$TMP/prompt-config-verbose.log" 2>"$TMP/prompt-verbose.log"
 grep -q 'prompt-opt\[debug\].*phase=config' "$TMP/prompt-verbose.log"
@@ -65,7 +77,7 @@ mkdir -p "$LAST_STATE"
 printf '%s\n' openai sol low pi openai-codex gpt-6-luna medium >"$LAST_STATE/last-settings.txt"
 PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/last-settings-state" \
   bash -c 'enable -n mapfile 2>/dev/null || :; source "$0" --last --show-config' "$ROOT/bin/prompt-opt" >"$TMP/last-settings-config.log"
-grep -q 'Target: *provider=openai model=sol effort=low environment=pi' "$TMP/last-settings-config.log"
+grep -q 'Target: *provider=openai model=gpt-6.1-sol effort=low environment=pi' "$TMP/last-settings-config.log"
 grep -q 'Optimizer: *provider=openai-codex model=gpt-6-luna thinking=medium' "$TMP/last-settings-config.log"
 # With no xclip in PATH, both fresh and cached clipboard writes must use pbcopy.
 PBCOPY_BIN="$TMP/pbcopy-bin"

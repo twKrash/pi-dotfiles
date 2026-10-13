@@ -12,6 +12,7 @@ Identify the exact target model/version and runtime before applying model-specif
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GPT-6 Luna    | Clear task and input boundaries; explicit decision rules, output contracts, and validation when relevant. Calibrate detail to task complexity and reasoning effort. |
 | GPT-6 Sol     | Precise technical context, autonomy boundaries, evidence, proportionate verification                                                                                |
+| GPT-6.1 Sol   | Same core prompt approach as GPT-6 Sol; use supported effort levels (`low`, `medium`, `high`, `xhigh`, `max`). `medium` is the model default; `none` and `minimal` are unsupported. |
 | GPT-6 Astra   | Clear ownership of longer tasks, milestones only where needed, bounded delegation and checkpoints                                                                   |
 | Claude Haiku  | Compact tasks, direct decision rules, uncomplicated output expectations                                                                                             |
 | Claude Sonnet | Balanced technical specificity, tool guidance, and verification                                                                                                     |
