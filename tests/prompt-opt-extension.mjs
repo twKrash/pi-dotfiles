@@ -39,6 +39,14 @@ try {
     registerCommand(name, definition) {
       assert.equal(name, "prompt-opt");
       handler = definition.handler;
+      assert.deepEqual(
+        definition.getArgumentCompletions("--opt-effort=med"),
+        [{ value: "--opt-effort=medium", label: "medium" }],
+      );
+      assert.deepEqual(
+        definition.getArgumentCompletions("--debug --opt-effort=med"),
+        [{ value: "--debug --opt-effort=medium", label: "medium" }],
+      );
     },
     appendEntry(type, data) { entries.push({ type, data }); },
   });

@@ -2,6 +2,21 @@
 import { spawn } from "node:child_process";
 
 const allowedFlag = /^(?:--debug|--verbose|--(?:provider|model|effort|environment|opt-provider|opt-model|opt-effort)=[A-Za-z0-9._/-]+)$/;
+const completionFlags = ["--debug", "--verbose", "--provider=", "--model=", "--effort=", "--environment=", "--opt-provider=", "--opt-model=", "--opt-effort="];
+const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function getArgumentCompletions(prefix) {
+  const separator = prefix.lastIndexOf(" ") + 1;
+  const previous = prefix.slice(0, separator);
+  const current = prefix.slice(separator);
+  const options = /^(--(?:opt-)?effort=)(.*)$/.exec(current);
+  const candidates = options
+    ? thinkingLevels.filter(level => level.startsWith(options[2])).map(level => ({ value: `${previous}${options[1]}${level}`, label: level }))
+    : completionFlags
+        .filter(flag => flag.startsWith(current))
+        .map(flag => ({ value: `${previous}${flag}`, label: flag }));
+  return candidates.length ? candidates : null;
+}
 
 function runOptimizer(task, flags, debugLog) {
   const startedAt = Date.now();
@@ -58,6 +73,7 @@ function retrieveHistory(hash, ctx) {
 export default function (pi) {
   pi.registerCommand("prompt-opt", {
     description: "Optimize a prompt using the standalone prompt-opt runner",
+    getArgumentCompletions,
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
       const raw = args?.trim() ?? "";

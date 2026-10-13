@@ -28,6 +28,8 @@ Review staged `.pi-dotfiles-new` files before applying them. The script does not
 
 ### Prompt optimizer
 
+`prompt-opt --model=sol` now selects GPT-6.1 Sol (`gpt-6.1-sol`). Use `--model=sol-6` for GPT-6 Sol (`gpt-6-sol`) or `--model=sol-6.1` explicitly for GPT-6.1 Sol.
+
 Run `prompt-opt` for interactive prompt editing or pass a task file/stdin. Use `/prompt-opt` inside Pi to insert optimized output into the editor. Use `prompt-opt --history` to list recorded request hashes and `prompt-opt --history HASH` (or `/prompt-opt --history=HASH`) to display original and optimized prompts. `--no-cache` forces another run while preserving prior records. Cache identity includes the exact request bytes, seven resolved settings, prompt-lab files, Pi version, and contract revision; ambient Pi/ancestor context is not fingerprinted. Legacy results remain visible as unverified. Add `--debug` (alias `--verbose`) to log phase timings; the extension records metadata-only `prompt-opt-debug` entries in the current session. Run `prompt-opt --help` for options. The command needs `~/.local/bin` on `PATH`; clipboard copy uses `xclip` when available, otherwise `pbcopy`.
 
 To update configs after fetching repository changes:
