@@ -59,6 +59,45 @@ cat >"${CLIP_CAPTURE:-/dev/null}"
 if [ "${FAIL_CLIPBOARD:-0}" = 1 ]; then exit 1; fi
 MOCK_XCLIP
 chmod +x "$TMP/mock-bin/pi" "$TMP/mock-bin/xclip"
+# --last settings loading must work without Bash 4's mapfile builtin.
+LAST_STATE="$TMP/last-settings-state/prompt-opt"
+mkdir -p "$LAST_STATE"
+printf '%s\n' openai sol low pi openai-codex gpt-6-luna medium >"$LAST_STATE/last-settings.txt"
+PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/last-settings-state" \
+  bash -c 'enable -n mapfile 2>/dev/null || :; source "$0" --last --show-config' "$ROOT/bin/prompt-opt" >"$TMP/last-settings-config.log"
+grep -q 'Target: *provider=openai model=sol effort=low environment=pi' "$TMP/last-settings-config.log"
+grep -q 'Optimizer: *provider=openai-codex model=gpt-6-luna thinking=medium' "$TMP/last-settings-config.log"
+# With no xclip in PATH, both fresh and cached clipboard writes must use pbcopy.
+PBCOPY_BIN="$TMP/pbcopy-bin"
+mkdir -p "$PBCOPY_BIN"
+for tool in bash node dirname mktemp rm cp grep head wc tr cat; do
+  ln -s "$(command -v "$tool")" "$PBCOPY_BIN/$tool"
+done
+cat >"$PBCOPY_BIN/pi" <<'PBCOPY_PI'
+#!/bin/sh
+if [ "${1:-}" = --version ]; then echo 1.1.0; exit 0; fi
+printf 'optimized-pbcopy\n'
+PBCOPY_PI
+cat >"$PBCOPY_BIN/pbcopy" <<'PBCOPY_CLIPBOARD'
+#!/bin/sh
+cat >"$CLIP_CAPTURE"
+printf 'called\n' >>"$PB_COPY_CALLS"
+PBCOPY_CLIPBOARD
+chmod +x "$PBCOPY_BIN/pi" "$PBCOPY_BIN/pbcopy"
+printf 'pbcopy task\n' >"$TMP/pbcopy-request.md"
+printf 'optimized-pbcopy\n' >"$TMP/pbcopy-expected.out"
+PATH="$PBCOPY_BIN" CLIP_CAPTURE="$TMP/pbcopy-clipboard.out" PB_COPY_CALLS="$TMP/pbcopy-calls" \
+  PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/pbcopy-state" \
+  "$ROOT/bin/prompt-opt" --debug "$TMP/pbcopy-request.md" >"$TMP/pbcopy-first.out" 2>"$TMP/pbcopy-first.log"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-first.out"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-clipboard.out"
+PATH="$PBCOPY_BIN" CLIP_CAPTURE="$TMP/pbcopy-clipboard.out" PB_COPY_CALLS="$TMP/pbcopy-calls" \
+  PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/pbcopy-state" \
+  "$ROOT/bin/prompt-opt" --debug "$TMP/pbcopy-request.md" >"$TMP/pbcopy-cached.out" 2>"$TMP/pbcopy-cached.log"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-cached.out"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-clipboard.out"
+grep -q 'phase=cache_hit' "$TMP/pbcopy-cached.log"
+test "$(wc -l <"$TMP/pbcopy-calls")" -eq 2
 # Exact-byte history is immutable and repeated requests should be served without Pi.
 PI_CALLS="$TMP/pi-calls"
 export PI_CALLS

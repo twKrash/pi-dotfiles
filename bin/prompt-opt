@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optimize a prompt with Pi, show it, and copy the result to the X11 clipboard.
+# Optimize a prompt with Pi, show it, and copy the result to the clipboard.
 set -euo pipefail
 
 run_started=$SECONDS
@@ -166,7 +166,8 @@ pi_id_for_model() {
 # Load previous invocation settings for --last, but never interpret them as code.
 previous=()
 if [[ "$input_mode" == --last && -s "$last_settings" ]]; then
-  mapfile -t previous <"$last_settings"
+  setting=''
+  while IFS= read -r setting || [[ -n "$setting" ]]; do previous+=("$setting"); done <"$last_settings"
 fi
 # Older releases had no settings file: their only supported setup was Luna High.
 while ((${#previous[@]} < 7)); do previous+=(""); done
@@ -253,7 +254,19 @@ if ((show_config)); then
   exit 0
 fi
 
-command -v xclip >/dev/null || die 'xclip is not available in PATH'
+if command -v xclip >/dev/null 2>&1; then
+  clipboard_backend=xclip
+elif command -v pbcopy >/dev/null 2>&1; then
+  clipboard_backend=pbcopy
+else
+  die 'neither xclip nor pbcopy is available in PATH'
+fi
+copy_to_clipboard() {
+  case "$clipboard_backend" in
+  xclip) xclip -selection clipboard -in ;;
+  pbcopy) pbcopy ;;
+  esac <"$1"
+}
 
 command -v pi >/dev/null || die 'pi is not available in PATH'
 pi_executable=$(command -v pi)
@@ -336,8 +349,8 @@ NODE
 fi
 if [[ -n "$compatibility" && "$no_cache" -eq 0 ]]; then
   if node "$history_helper" lookup "$STATE_DIR" "$request" "$last_settings" "$compatibility" >"$answer"; then
-    if ! xclip -selection clipboard -in <"$answer" >/dev/null 2>"$work_dir/cache-xclip.stderr"; then
-      cat -- "$work_dir/cache-xclip.stderr" >&2
+    if ! copy_to_clipboard "$answer" >/dev/null 2>"$work_dir/cache-clipboard.stderr"; then
+      cat -- "$work_dir/cache-clipboard.stderr" >&2
       die 'could not copy cached output to clipboard'
     fi
     cp -- "$answer" "$last_output"; cp -- "$request" "$success_input"; printf '%s\n' "$settings" >"$success_settings"
@@ -397,7 +410,7 @@ if grep -Eq '^(Error:|Error [0-9]{3}:)' "$answer"; then
 fi
 
 debug_log 'phase=clipboard_start'
-clipboard_errors="$work_dir/xclip.stderr"
+clipboard_errors="$work_dir/clipboard.stderr"
 post_version=$(pi --version 2>/dev/null | head -n 1 || true)
 post_compatibility=''
 if [[ -d "$LAB_DIR" && "$post_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]]; then
@@ -416,7 +429,7 @@ const [file,compatibility,settings,piVersion,debug,debugEvents]=process.argv.sli
 fs.writeFileSync(file,JSON.stringify({compatibility,source_context_digest:compatibility||null,settings:settings.split('\n'),pi_version:piVersion||null,contract_revision:'prompt-opt-contract-1',debug_enabled:debug==='1',debug_metadata:debugEvents.split('\n').filter(Boolean),unverified_reason:compatibility?'':'lab or Pi compatibility context changed or unavailable'}));
 NODE
 node "$history_helper" save "$STATE_DIR" "$request" "$answer" "$metadata" >/dev/null
-if xclip -selection clipboard -in "$answer" </dev/null >/dev/null 2>"$clipboard_errors"; then
+if copy_to_clipboard "$answer" >/dev/null 2>"$clipboard_errors"; then
   debug_log 'phase=clipboard_complete'
 else
   cat -- "$clipboard_errors" >&2
