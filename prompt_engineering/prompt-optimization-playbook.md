@@ -14,11 +14,22 @@ Identify the exact target model/version and runtime before applying model-specif
 | GPT-6 Sol     | Precise technical context, autonomy boundaries, evidence, proportionate verification                                                                                |
 | GPT-6.1 Sol   | Same core prompt approach as GPT-6 Sol; use supported effort levels (`low`, `medium`, `high`, `xhigh`, `max`). `medium` is the model default; `none` and `minimal` are unsupported. |
 | GPT-6 Astra   | Clear ownership of longer tasks, milestones only where needed, bounded delegation and checkpoints                                                                   |
-| Claude Haiku  | Compact tasks, direct decision rules, uncomplicated output expectations                                                                                             |
-| Claude Sonnet | Balanced technical specificity, tool guidance, and verification                                                                                                     |
-| Claude Opus   | Outcome-oriented complex tasks, deliberate scope control, independent investigation where valuable                                                                  |
+| Claude Haiku 5.5  | Focused, high-volume tasks; explicit unknown handling; for long agent prompts, a "keep working until done" line and a real-check requirement for code changes; for search, today's date |
+| Claude Sonnet 5.5 | Explicit scope: name what to do and what not to add (it tends to add tests/docs unasked); completion = change checked by a real test/build; "ideas or plan first" when wanted |
+| Claude Opus 5.5   | Outcome-oriented complex and long-running work, clear ownership and completion condition; for unattended runs, name unwanted early stops; explore unnamed sources in multi-app tasks |
 
 Do not manufacture differences between two models when their relevant documented recommendations are the same. Support newer releases only after checking that their behavior and configuration are actually documented.
+
+### Claude wording (all current models)
+
+From the official guides (see `prompting-references.md` AN-01 to AN-05):
+
+- Write in a calm, normal tone. Replace `CRITICAL`/`MUST`/`NEVER`/`!!!` with plain statements; shouting and "if in doubt, use [tool]" cause overtriggering.
+- Give the reason behind a constraint when it is not obvious; say what to do rather than only what to avoid.
+- Separate instructions from variable inputs with descriptive XML tags. Mark pasted or retrieved content as data to analyse, not instructions.
+- Never ask the model to write its reasoning in the response ("think step by step", "show your work"). Thinking is runtime-controlled, and Opus/Sonnet 5.5 may decline such requests (`reasoning_extraction`). A short justification or summary of actions is fine.
+- Effort, thinking mode, structured outputs, prefill, and `max_tokens` are runtime settings. Mention them in notes when relevant; do not write them into the generated prompt as instructions. Prefill is unsupported on current models, so state the output contract in the prompt or point to structured outputs.
+- (Observed in this lab's 2026-10-12 evaluation, not vendor guidance.) Keep the user's output contract exact. Do not add fields, labels, sentinels, placeholders, or counts the user did not ask for. If a user instruction looks risky (for example "make your best guess" in extraction), keep it and flag the risk in notes rather than silently reversing it.
 
 ### Reasoning Effort
 
