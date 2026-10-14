@@ -9,7 +9,7 @@ import promptOptExtension from "../home/dot_pi/private_agent/private_extensions/
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Keep the caller's prompt-opt defaults out of the assertions.
-for (const name of Object.keys(process.env)) if (/^PROMPT_OPT_(TARGET|RUNNER|PI)_/.test(name)) delete process.env[name];
+for (const name of Object.keys(process.env)) if (/^PROMPT_OPT_(TARGET|RUNNER|PI|ANTHROPIC)_/.test(name)) delete process.env[name];
 const temp = await realpath(await mkdtemp(path.join(os.tmpdir(), "prompt-opt-extension-")));
 const bin = path.join(temp, "bin");
 const argsFile = path.join(temp, "args.txt");

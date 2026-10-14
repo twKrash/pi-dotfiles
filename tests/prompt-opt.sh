@@ -4,7 +4,8 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # Keep the caller's prompt-opt defaults out of the assertions.
 unset PROMPT_LAB_DIR PROMPT_OPT_TARGET_PROVIDER PROMPT_OPT_TARGET_MODEL PROMPT_OPT_TARGET_EFFORT PROMPT_OPT_TARGET_ENVIRONMENT \
-  PROMPT_OPT_RUNNER_PROVIDER PROMPT_OPT_RUNNER_MODEL PROMPT_OPT_RUNNER_EFFORT PROMPT_OPT_PI_PROVIDER PROMPT_OPT_PI_MODEL PROMPT_OPT_PI_EFFORT
+  PROMPT_OPT_RUNNER_PROVIDER PROMPT_OPT_RUNNER_MODEL PROMPT_OPT_RUNNER_EFFORT PROMPT_OPT_PI_PROVIDER PROMPT_OPT_PI_MODEL PROMPT_OPT_PI_EFFORT \
+  PROMPT_OPT_ANTHROPIC_PROVIDER PROMPT_OPT_RUNNER_EXTENSION
 TMP=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 HOME="$TMP/home"
@@ -105,6 +106,27 @@ PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/isolation-calls" PI_ARGS="$TMP/isolati
   "$PROMPT_OPT" "$TMP/isolation-request.md" >/dev/null
 grep -qx -- '--no-context-files' "$TMP/isolation-args"
 grep -A1 -x -- '--append-system-prompt' "$TMP/isolation-args" | tail -n 1 | grep -qx "$LAB/AGENTS.md"
+if grep -qx -- '--extension' "$TMP/isolation-args"; then exit 1; fi
+# PROMPT_OPT_RUNNER_EXTENSION loads exactly that extension for the optimizer run; a missing file is an error.
+printf '%s\n' 'export default function () {}' >"$TMP/runner-ext.js"
+printf 'runner extension task\n' >"$TMP/runner-ext-request.md"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/runner-ext-calls" PI_ARGS="$TMP/runner-ext-args" PROMPT_OPT_RUNNER_EXTENSION="$TMP/runner-ext.js" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/runner-ext-state" "$PROMPT_OPT" "$TMP/runner-ext-request.md" >/dev/null
+grep -qx -- '--no-extensions' "$TMP/runner-ext-args"
+grep -A1 -x -- '--extension' "$TMP/runner-ext-args" | tail -n 1 | grep -qx "$TMP/runner-ext.js"
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/runner-ext-calls" PROMPT_OPT_RUNNER_EXTENSION="$TMP/missing-ext.js" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/runner-ext-missing-state" "$PROMPT_OPT" "$TMP/runner-ext-request.md" >/dev/null 2>"$TMP/runner-ext-missing.log"; then exit 1; fi
+grep -q 'runner extension does not exist' "$TMP/runner-ext-missing.log"
+# PROMPT_OPT_ANTHROPIC_PROVIDER routes a resolved "anthropic" optimizer through another Pi provider only.
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/anthropic-provider-state" PROMPT_OPT_ANTHROPIC_PROVIDER=claude-bridge \
+  "$PROMPT_OPT" --model=opus-5.5 --opt-model=sonnet-5.5 --show-config >"$TMP/anthropic-provider.log"
+grep -q 'Optimizer: *provider=claude-bridge model=claude-sonnet-5-5 ' "$TMP/anthropic-provider.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/anthropic-default-state" \
+  "$PROMPT_OPT" --model=opus-5.5 --opt-model=sonnet-5.5 --show-config >"$TMP/anthropic-default.log"
+grep -q 'Optimizer: *provider=anthropic model=claude-sonnet-5-5 ' "$TMP/anthropic-default.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/anthropic-openai-state" PROMPT_OPT_ANTHROPIC_PROVIDER=claude-bridge \
+  "$PROMPT_OPT" --model=sol --show-config >"$TMP/anthropic-openai.log"
+grep -q 'Optimizer: *provider=openai ' "$TMP/anthropic-openai.log"
 # Exact-byte history is immutable and repeated requests should be served without Pi.
 PI_CALLS="$TMP/pi-calls"
 export PI_CALLS
