@@ -1,14 +1,13 @@
 #!/usr/bin/env node
+// chezmoi modify_ helper: reads the live JSON file on stdin, writes the merged file to stdout.
 import fs from 'node:fs';
-import path from 'node:path';
 
-const [kind, sourcePath, targetPath, profilePath] = process.argv.slice(2);
-if (!['settings', 'mcp'].includes(kind) || !sourcePath || !targetPath) {
-  console.error('usage: merge-json.mjs settings|mcp SOURCE TARGET [PROFILE]');
+const [kind, sourcePath, profilePath] = process.argv.slice(2);
+if (!['settings', 'mcp'].includes(kind) || !sourcePath) {
+  console.error('usage: merge-json.mjs settings|mcp SOURCE [PROFILE] <current.json >merged.json');
   process.exit(2);
 }
-const dryRun = process.env.PI_DOTFILES_DRY_RUN === '1';
-const force = process.env.PI_DOTFILES_FORCE === '1';
+const targetPath = 'current file';
 function readJson(file) {
   const text = fs.readFileSync(file, 'utf8');
   try { return JSON.parse(text); }
@@ -17,11 +16,11 @@ function readJson(file) {
 const source = readJson(sourcePath);
 const profile = profilePath ? readJson(profilePath) : {};
 let current = {};
-try { current = JSON.parse(fs.readFileSync(targetPath, 'utf8')); }
-catch (error) { if (error.code !== 'ENOENT') throw new Error(`Invalid JSON in ${targetPath}: ${error.message}`); }
+const currentText = fs.readFileSync(0, 'utf8');
+try { if (currentText.trim()) current = JSON.parse(currentText); }
+catch (error) { throw new Error(`Invalid JSON in ${targetPath}: ${error.message}`); }
 if (!current || Array.isArray(current) || typeof current !== 'object') throw new Error(`${targetPath} must contain a JSON object`);
 const next = structuredClone(current);
-let conflicts = false;
 
 function mergeDefaults(dst, src, prefix = '') {
   for (const [key, value] of Object.entries(src)) {
@@ -29,8 +28,7 @@ function mergeDefaults(dst, src, prefix = '') {
     if (!(key in dst)) dst[key] = value;
     else if (value && typeof value === 'object' && !Array.isArray(value) && dst[key] && typeof dst[key] === 'object' && !Array.isArray(dst[key])) mergeDefaults(dst[key], value, label);
     else if (JSON.stringify(dst[key]) !== JSON.stringify(value)) {
-      if (force) dst[key] = value;
-      else { conflicts = true; console.log(`CONFLICT retained local ${label}`); }
+      console.error(`pi-dotfiles: keeping local ${label}`);
     }
   }
 }
@@ -69,27 +67,9 @@ function mergeDefaults(dst, src, prefix = '') {
     for (const [name, server] of Object.entries(source.mcpServers ?? {})) {
       if (!(name in next.mcpServers)) next.mcpServers[name] = server;
       else if (JSON.stringify(next.mcpServers[name]) !== JSON.stringify(server)) {
-        if (force) next.mcpServers[name] = server;
-        else { conflicts = true; console.log(`CONFLICT retained local mcpServers.${name}`); }
+        console.error(`pi-dotfiles: keeping local mcpServers.${name}`);
       }
     }
   }
 
-const serialized = `${JSON.stringify(next, null, 2)}\n`;
-if (serialized === (fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '')) {
-  console.log(`UNCHANGED ${targetPath}`);
-} else {
-  console.log(`${dryRun ? 'WOULD UPDATE' : 'UPDATED'} ${targetPath}`);
-  if (!dryRun) {
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    if (fs.existsSync(targetPath)) {
-      const backup = `${targetPath}.pi-dotfiles-bak.${new Date().toISOString().replace(/[:.]/g, '-')}`;
-      fs.copyFileSync(targetPath, backup);
-      console.log(`BACKUP ${backup}`);
-    }
-    const temp = `${targetPath}.tmp.${process.pid}`;
-    fs.writeFileSync(temp, serialized, { mode: 0o600 });
-    fs.renameSync(temp, targetPath);
-  }
-}
-if (conflicts) process.exitCode = 3;
+process.stdout.write(`${JSON.stringify(next, null, 2)}\n`);

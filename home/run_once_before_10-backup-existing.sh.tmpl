@@ -1,0 +1,37 @@
+#!/bin/sh
+# First adoption: copy every existing destination this repo manages into a fresh private backup
+# before chezmoi changes anything (run_once_: runs again only if this script changes or failed).
+#   paths/<rel>      a managed path as it was (symlinks kept as symlinks)
+#   ancestors/<dir>  a parent that is a symlink or not a directory; chezmoi would replace it with a
+#                    real directory, so it is saved as-is and nothing is copied through it
+#   COMPLETE         written last; a snapshot without it is partial
+# tests/chezmoi.sh checks that the list covers everything `chezmoi managed` reports.
+set -eu
+dest={{ .chezmoi.destDir | shellQuote }}
+backup=
+save() { # save KIND REL: copy $dest/REL to $backup/KIND/REL, never following REL itself
+  if [ -z "$backup" ]; then
+    mkdir -p "$dest/.local/state/pi-dotfiles"
+    backup=$(mktemp -d "$dest/.local/state/pi-dotfiles/adoption-backup-$(date '+%Y%m%d%H%M%S').XXXXXX")
+  fi
+  if [ -e "$backup/$1/$2" ] || [ -L "$backup/$1/$2" ]; then return 0; fi # parent shared by several paths
+  mkdir -p "$backup/$1/$(dirname "$2")"
+  cp -RP "$dest/$2" "$backup/$1/$2"
+}
+for rel in .pi/agent/AGENTS.md .pi/agent/settings.json .pi/agent/mcp.json .pi/agent/MEMORY.md .pi/agent/extensions .pi/agent/skills/prompt-engineering .claude/CLAUDE.md .codex/AGENTS.md .local/bin/prompt-opt .local/bin/prompt-opt-history.mjs ai/prompt_engineering; do
+  top=
+  parent=$(dirname "$rel")
+  while [ "$parent" != . ]; do
+    if [ -L "$dest/$parent" ] || { [ -e "$dest/$parent" ] && [ ! -d "$dest/$parent" ]; }; then top=$parent; fi
+    parent=$(dirname "$parent")
+  done
+  if [ -n "$top" ]; then
+    save ancestors "$top"
+  elif [ -e "$dest/$rel" ] || [ -L "$dest/$rel" ]; then
+    save paths "$rel"
+  fi
+done
+if [ -n "$backup" ]; then
+  : >"$backup/COMPLETE"
+  echo "pi-dotfiles: backed up existing files to $backup" >&2
+fi

@@ -1,66 +1,67 @@
 # pi-dotfiles
 
-Portable user-level configuration, utilities, and skills for [Pi](https://pi.dev), maintained for `twKrash`. Pi packages are referenced, not vendored; selected local utilities and reference material are managed here.
+Portable user-level configuration, utilities, and skills for [Pi](https://pi.dev) and other agent harnesses (Claude Code, Codex), maintained for `twKrash` and applied with [chezmoi](https://www.chezmoi.io). Pi packages are referenced, not vendored.
 
-## Install or update
+## Install
 
 ```sh
-git clone https://github.com/twKrash/pi-dotfiles.git
-cd pi-dotfiles
-./scripts/setup.sh --dry-run pi claude   # preview; pick the harnesses used on this machine
-./scripts/setup.sh pi claude             # first run: harnesses are required, then remembered
-./scripts/setup.sh --provider=claude     # optional: Pi subagent model profile (codex|claude)
+brew install chezmoi                                   # or see chezmoi.io/install
+git clone git@github.com:twKrash/pi-dotfiles.git ~/Work/code/pi-dotfiles
+chezmoi init --source ~/Work/code/pi-dotfiles          # asks: harnesses on this machine, Pi subagent profile
+chezmoi diff                                           # review
+chezmoi apply                                          # asks before replacing any existing file
 ```
 
-### Harnesses
+### First adoption on a machine with existing files
 
-Setup takes one or more harnesses (`pi`, `claude`, `codex`); the first run requires them and stores the list in `~/.config/pi-dotfiles/harnesses` (`PI_DOTFILES_CONFIG_DIR` overrides the directory), so later runs need no arguments. Each harness gets its own generated global instructions file:
+- The generated config sets `lessInteractive = true`: `chezmoi apply` asks (diff / overwrite / skip) before replacing any file chezmoi did not write itself, including symlinks such as a linked `~/.pi/agent/AGENTS.md`. Without a terminal it stops instead of overwriting.
+- Before the first apply changes anything, a one-time script backs up every existing managed path to a fresh `~/.local/state/pi-dotfiles/adoption-backup-<timestamp>.<random>/` (mode 0700): `paths/` holds managed paths as they were (symlinks kept), `ancestors/` holds parents that are symlinks or plain files (chezmoi would replace them with directories), and `COMPLETE` marks a finished snapshot. A failed attempt leaves its partial snapshot without `COMPLETE`; the retry writes a new one.
+- Moving from `setup.sh`: rules in `~/.config/pi-dotfiles/local.md` move to `~/.config/chezmoi/local.md`. Rendering stops with an explicit message while the old file exists; if both exist, merge the old rules into the new file and delete the old one.
+
+`chezmoi init` writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` (this checkout), the selected `harnesses` (`pi`, `claude`, `codex`), the Pi subagent `provider` profile (`none`, `claude`, `codex`), and `nvim -d` as merge tool. Answers are remembered; run `chezmoi init` again after the config template (`home/.chezmoi.toml.tmpl`) changes. Requirements: chezmoi >= 2.72.0 (enforced by the config template), Node.js (already required by Pi), and `~/.local/bin` on `PATH`.
+
+## Daily use
+
+| Task | Command |
+|---|---|
+| Update | `git pull --ff-only && chezmoi diff && chezmoi apply` |
+| A managed file was edited locally | `chezmoi apply` asks (diff / overwrite / skip); `chezmoi merge <file>` opens a 3-way merge |
+| Copy a local edit back into the repo | `chezmoi re-add <file>` (plain files), then commit |
+| Machine-only instructions | edit `~/.config/chezmoi/local.md`, then `chezmoi apply` |
+
+## Harnesses
+
+Each selected harness gets its own generated global instructions file; files of unselected harnesses are not installed (`home/.chezmoiignore`).
 
 | Harness | Generated file | Contents |
 |---|---|---|
 | `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local |
-| `claude` | `~/.claude/CLAUDE.md` (`CLAUDE_CONFIG_DIR`) | core + `instructions/harness-claude.md` + local |
-| `codex` | `~/.codex/AGENTS.md` (`CODEX_HOME`) | core + local |
+| `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local |
+| `codex` | `~/.codex/AGENTS.md` | core + local |
 
-Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/pi-dotfiles/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context.
+Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
 
-The Pi agent target defaults to `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use another Pi agent directory. Setup also installs `prompt-opt` under `~/.local/bin`, and prompt-engineering lab files under `~/ai/prompt_engineering` (the CLI default; set `PROMPT_LAB_DIR` to override at runtime). `setup.sh` uses POSIX `/bin/sh` and Node.js (already required by Pi). Keep `~/.local/bin` on `PATH`.
+## Layout
 
-- `bin/prompt-opt`: standalone Bash prompt optimizer; requires Pi, an editor for interactive input, and `xclip` or `pbcopy` for clipboard copy (`pbcopy` supports macOS).
-- `agent/extensions/prompt-opt-pi.js`: registers the `/prompt-opt` Pi command and invokes the standalone CLI by name, so its install location must be on `PATH`.
-- `prompt_engineering/`: canonical prompt-engineering instruction, playbook, and references installed into `~/ai/prompt_engineering`. Setup generates the Pi skill `SKILL.md` from `AGENTS.md` plus Pi metadata and copies reference files from this same source; existing files are preserved and staged as `.pi-dotfiles-new` on conflict.
-- `settings.json`: merges package sources and portable subagent role defaults; keeps other settings and existing package entries. `--provider=codex|claude` selects model/thinking defaults for subagents; explicit selection replaces only those fields, preserving local tool allowlists and other role settings. Claude profile adds `npm:pi-claude-agent-sdk` (setup does not install packages).
-- `mcp.json`: adds Context7 only; preserves other MCP servers. A conflicting local Context7 entry is kept unless `--force` is used.
-- Managed files: new files are copied; differing files are preserved and staged beside the target as `.pi-dotfiles-new`.
-- `MEMORY.md`: created from the empty template only when absent. Existing memory is never overwritten.
-- `--force`: backs up and replaces conflicting managed files. It still preserves unrelated settings and MCP servers.
+`.chezmoiroot` points chezmoi at `home/`, which mirrors `~` using chezmoi's [source naming](https://www.chezmoi.io/reference/source-state-attributes/) (`dot_` → `.`, `private_` → mode 0700/0600, `executable_`, `create_`, `empty_`, `modify_`, `.tmpl`). `~/.pi/agent` and its `extensions/` stay private because they sit next to Pi credentials. Plain files are copied as-is (and support `chezmoi re-add`); only generated files are templates.
 
-Review staged `.pi-dotfiles-new` files before applying them. The script does not remove packages or run package installers. After reviewing package sources, use Pi's package commands (for example `pi update --extensions`) to install or update executable extensions. The prompt-opt adapter and CLI are copied as managed files, not registered Pi packages. Existing differing managed files are preserved and staged; `--force` backs them up before replacement.
+- `home/dot_local/bin/executable_prompt-opt`, `prompt-opt-history.mjs`: the prompt optimizer CLI (`~/.local/bin`).
+- `home/ai/prompt_engineering/`: canonical prompt-engineering lab (`~/ai/prompt_engineering`, the `prompt-opt` default; `PROMPT_LAB_DIR` overrides at runtime).
+- `home/dot_pi/private_agent/private_extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
+- `home/dot_pi/private_agent/skills/prompt-engineering/`: Pi skill generated from the lab (`SKILL.md` = Pi metadata + lab `AGENTS.md`; references included from the lab).
+- `home/dot_pi/private_agent/create_empty_MEMORY.md`: memory template, created only when absent (an existing file, even an empty one, is kept).
+- `home/dot_pi/private_agent/modify_settings.json.tmpl`, `modify_mcp.json.tmpl`: merge repo defaults into the live files via `scripts/merge-json.mjs` (stdin → stdout). Unrelated settings, extra packages, other MCP servers, and keys Pi writes itself are kept; conflicting local values win and are reported. The `claude`/`codex` profile replaces only subagent model/thinking fields; `none` leaves models untouched. The Claude profile adds `npm:pi-claude-agent-sdk` (packages are not installed; use `pi update --extensions` after review).
+- `home/.chezmoitemplates/instructions.tmpl`: composes the per-harness instruction files.
+- `instructions/`: core and per-harness instruction sources.
+- `agent/settings.json`, `agent/mcp.json`, `agent/providers/`: merge inputs (package list and portable `pi-subagents` role defaults; Context7 only, no personal MCP headers; opt-in `codex` and `claude` subagent profiles).
+- Graphify skill: not vendored. Install it with `graphify install --platform pi` (and `--platform claude`) and re-run after upgrading graphify.
+- `tests/`: `sh tests/prompt-opt.sh` and `sh tests/chezmoi.sh` (applies into throwaway homes; never touches `~`).
 
 ### Prompt optimizer
 
 `prompt-opt --model=sol` now selects GPT-6.1 Sol (`gpt-6.1-sol`). Use `--model=sol-6` for GPT-6 Sol (`gpt-6-sol`) or `--model=sol-6.1` explicitly for GPT-6.1 Sol.
 
 Run `prompt-opt` for interactive prompt editing or pass a task file/stdin. Use `/prompt-opt` inside Pi to insert optimized output into the editor. Use `prompt-opt --history` to list recorded request hashes and `prompt-opt --history HASH` (or `/prompt-opt --history=HASH`) to display original and optimized prompts. `--no-cache` forces another run while preserving prior records. Cache identity includes the exact request bytes, seven resolved settings, prompt-lab files, Pi version, and contract revision. The optimizer run loads only the lab `AGENTS.md` (`--no-context-files`), so global or ancestor `AGENTS.md`/`CLAUDE.md` files do not affect results. Legacy results remain visible as unverified. Add `--debug` (alias `--verbose`) to log phase timings; the extension records metadata-only `prompt-opt-debug` entries in the current session. Run `prompt-opt --help` for options. The command needs `~/.local/bin` on `PATH`; clipboard copy uses `xclip` when available, otherwise `pbcopy`.
-
-To update configs after fetching repository changes:
-
-```sh
-git pull --ff-only
-./scripts/setup.sh --dry-run
-./scripts/setup.sh
-```
-
-## Included config
-
-- `instructions/`: core and per-harness instruction sources (see Harnesses).
-- `agent/MEMORY.md.template`: headings only; no personal memory content.
-- `agent/settings.json`: package list and portable `pi-subagents` role defaults. Provider model IDs live in opt-in `agent/providers/` profiles.
-- `agent/mcp.json`: Context7 endpoint only; personal MCP headers are excluded.
-- `agent/extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
-- `agent/providers/`: opt-in `codex` and `claude` subagent model profiles.
-- Graphify skill: not vendored. Install it with `graphify install --platform pi` (the installer writes a Pi-specific variant) and re-run it after upgrading graphify.
-- Pi prompt-engineering skill: generated during setup from `prompt_engineering/AGENTS.md` plus Pi metadata; skill references are copied from that same canonical source tree.
 
 Provider profiles set scout to a low-cost model, worker to a mid-tier model, reviewer to Opus 5.5 at medium effort, and oracle to Opus 5.5 at high effort for Claude. Use per-run thinking overrides for oracle `xhigh` when task warrants it. No provider option leaves existing models untouched.
 

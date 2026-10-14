@@ -1,6 +1,6 @@
 # Pi harness addendum
 
-This section only specializes the instructions above for Pi. Setup appends it to the installed global `AGENTS.md`, which Pi always loads; a project's `.pi/APPEND_SYSTEM.md` would replace a global `APPEND_SYSTEM.md`.
+This section only specializes the instructions above for Pi. chezmoi appends it to the installed global `AGENTS.md`, which Pi always loads; a project's `.pi/APPEND_SYSTEM.md` would replace a global `APPEND_SYSTEM.md`.
 
 - Graphify: install the skill with `graphify install --platform pi`; invoke it as `/skill:graphify`.
 

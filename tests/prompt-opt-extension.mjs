@@ -5,7 +5,7 @@ import os from "node:os";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import promptOptExtension from "../agent/extensions/prompt-opt-pi.js";
+import promptOptExtension from "../home/dot_pi/private_agent/private_extensions/prompt-opt-pi.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Keep the caller's prompt-opt defaults out of the assertions.
@@ -122,7 +122,7 @@ printf '%s\n' "$!" > "$PROMPT_OPT_TEST_BG_PID"
   await chmod(xclipStub, 0o755);
 
   let completeAt;
-  const child = spawn(path.join(root, "bin/prompt-opt"), ["--debug", "-"], {
+  const child = spawn(path.join(root, "home/dot_local/bin/executable_prompt-opt"), ["--debug", "-"], {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
@@ -130,7 +130,7 @@ printf '%s\n' "$!" > "$PROMPT_OPT_TEST_BG_PID"
       PATH: `${pipeBin}${path.delimiter}${process.env.PATH ?? ""}`,
       PROMPT_OPT_TEST_BG_PID: daemonPidFile,
       PROMPT_OPT_TEST_PI_CALLS: piCallsFile,
-      PROMPT_LAB_DIR: path.join(root, "prompt_engineering"),
+      PROMPT_LAB_DIR: path.join(root, "home/ai/prompt_engineering"),
       XDG_STATE_HOME: path.join(pipeTemp, "state"),
     },
   });
@@ -154,9 +154,9 @@ printf '%s\n' "$!" > "$PROMPT_OPT_TEST_BG_PID"
     try { process.kill(Number(await readFile(daemonPidFile, "utf8")), "SIGTERM"); } catch {}
 
     completeAt = undefined;
-    const warm = spawn(path.join(root, "bin/prompt-opt"), ["--debug", "-"], {
+    const warm = spawn(path.join(root, "home/dot_local/bin/executable_prompt-opt"), ["--debug", "-"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, HOME: pipeTemp, PATH: `${pipeBin}${path.delimiter}${process.env.PATH ?? ""}`, PROMPT_OPT_TEST_BG_PID: daemonPidFile, PROMPT_OPT_TEST_PI_CALLS: piCallsFile, PROMPT_LAB_DIR: path.join(root, "prompt_engineering"), XDG_STATE_HOME: path.join(pipeTemp, "state") },
+      env: { ...process.env, HOME: pipeTemp, PATH: `${pipeBin}${path.delimiter}${process.env.PATH ?? ""}`, PROMPT_OPT_TEST_BG_PID: daemonPidFile, PROMPT_OPT_TEST_PI_CALLS: piCallsFile, PROMPT_LAB_DIR: path.join(root, "home/ai/prompt_engineering"), XDG_STATE_HOME: path.join(pipeTemp, "state") },
     });
     warm.stdout.resume(); warm.stderr.setEncoding("utf8");
     let cacheHitSeen = false;

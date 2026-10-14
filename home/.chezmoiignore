@@ -1,0 +1,13 @@
+{{- /* Only install the files of the harnesses selected in `chezmoi init`. */ -}}
+{{- if not (has "pi" .harnesses) }}
+.pi/**
+.local/bin/prompt-opt
+.local/bin/prompt-opt-history.mjs
+ai/**
+{{- end }}
+{{- if not (has "claude" .harnesses) }}
+.claude/**
+{{- end }}
+{{- if not (has "codex" .harnesses) }}
+.codex/**
+{{- end }}
