@@ -117,7 +117,6 @@ copy_one "$ROOT/agent/AGENTS.md" "$AGENT_DIR/AGENTS.md"
 copy_one "$ROOT/agent/APPEND_SYSTEM.md" "$AGENT_DIR/APPEND_SYSTEM.md"
 copy_one "$ROOT/agent/MEMORY.md.template" "$AGENT_DIR/MEMORY.md" yes
 copy_tree "$ROOT/agent/extensions" "$AGENT_DIR/extensions"
-copy_tree "$ROOT/agent/skills" "$AGENT_DIR/skills"
 
 skill_tmp=$(mktemp)
 trap 'rm -f "$skill_tmp"' EXIT HUP INT TERM

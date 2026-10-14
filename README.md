@@ -51,7 +51,7 @@ git pull --ff-only
 - `agent/mcp.json`: Context7 endpoint only; personal MCP headers are excluded.
 - `agent/extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
 - `agent/providers/`: opt-in `codex` and `claude` subagent model profiles.
-- `agent/skills/graphify/`: Graphify skill and references, with upstream MIT notice in `third_party/licenses/`.
+- Graphify skill: not vendored. Install it with `graphify install --platform pi` (the installer writes a Pi-specific variant) and re-run it after upgrading graphify.
 - Pi prompt-engineering skill: generated during setup from `prompt_engineering/AGENTS.md` plus Pi metadata; skill references are copied from that same canonical source tree.
 
 Provider profiles set scout to a low-cost model, worker to a mid-tier model, reviewer to Opus 5.5 at medium effort, and oracle to Opus 5.5 at high effort for Claude. Use per-run thinking overrides for oracle `xhigh` when task warrants it. No provider option leaves existing models untouched.
@@ -66,4 +66,4 @@ The permission template follows `@gotgenes/pi-permission-system`'s config format
 
 ## License
 
-Repository config is MIT licensed. Graphify files retain their upstream MIT notice; see `third_party/licenses/graphify-MIT.txt`.
+Repository config is MIT licensed.
