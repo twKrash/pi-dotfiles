@@ -1,0 +1,18 @@
+#!/bin/sh
+# First adoption: copy every existing destination this repo manages into a private backup
+# before chezmoi changes anything (run_once_: runs again only if this script changes).
+# tests/chezmoi.sh checks that this list covers everything `chezmoi managed` reports.
+set -eu
+dest={{ .chezmoi.destDir | shellQuote }}
+backup="$dest/.local/state/pi-dotfiles/adoption-backup-$(date '+%Y%m%d%H%M%S')"
+count=0
+for rel in .pi/agent/AGENTS.md .pi/agent/settings.json .pi/agent/mcp.json .pi/agent/MEMORY.md .pi/agent/extensions .pi/agent/skills/prompt-engineering .claude/CLAUDE.md .codex/AGENTS.md .local/bin/prompt-opt .local/bin/prompt-opt-history.mjs ai/prompt_engineering; do
+  if [ -e "$dest/$rel" ] || [ -L "$dest/$rel" ]; then
+    mkdir -p "$(dirname "$backup")"
+    [ -d "$backup" ] || mkdir -m 700 "$backup"
+    mkdir -p "$backup/$(dirname "$rel")"
+    cp -RP "$dest/$rel" "$backup/$rel"
+    count=$((count + 1))
+  fi
+done
+[ "$count" -eq 0 ] || echo "pi-dotfiles: backed up $count existing path(s) to $backup" >&2

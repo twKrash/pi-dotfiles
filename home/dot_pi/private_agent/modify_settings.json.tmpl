@@ -1,4 +1,4 @@
 #!/bin/sh
 # Merge repo defaults (and the chosen subagent profile) into the live file, stdin -> stdout.
 # Local values and keys Pi adds itself are kept.
-exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | quote }} settings {{ joinPath .chezmoi.workingTree "agent/settings.json" | quote }}{{ if ne .provider "none" }} {{ joinPath .chezmoi.workingTree (printf "agent/providers/%s.json" .provider) | quote }}{{ end }}
+exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | shellQuote }} settings {{ joinPath .chezmoi.workingTree "agent/settings.json" | shellQuote }}{{ if ne .provider "none" }} {{ joinPath .chezmoi.workingTree (printf "agent/providers/%s.json" .provider) | shellQuote }}{{ end }}

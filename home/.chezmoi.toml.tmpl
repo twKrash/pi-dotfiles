@@ -1,7 +1,10 @@
 {{- /* Answers are remembered; re-run `chezmoi init` after changing this template. */ -}}
+{{- if not (semverCompare ">=2.72.0" .chezmoi.version.version) }}{{ fail "pi-dotfiles needs chezmoi >= 2.72.0 (shellQuote)" }}{{ end -}}
 {{- $harnesses := promptMultichoiceOnce . "harnesses" "Harnesses on this machine" (list "pi" "claude" "codex") (list "pi") -}}
 {{- $provider := promptChoiceOnce . "provider" "Pi subagent model profile" (list "none" "claude" "codex") "none" -}}
 sourceDir = {{ .chezmoi.workingTree | quote }}
+# Ask before replacing files chezmoi did not write (first adoption) or that were edited locally.
+lessInteractive = true
 
 [data]
 harnesses = [{{ range $i, $h := $harnesses }}{{ if $i }}, {{ end }}{{ $h | quote }}{{ end }}]

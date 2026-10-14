@@ -9,10 +9,16 @@ brew install chezmoi                                   # or see chezmoi.io/insta
 git clone git@github.com:twKrash/pi-dotfiles.git ~/Work/code/pi-dotfiles
 chezmoi init --source ~/Work/code/pi-dotfiles          # asks: harnesses on this machine, Pi subagent profile
 chezmoi diff                                           # review
-chezmoi apply
+chezmoi apply                                          # asks before replacing any existing file
 ```
 
-`chezmoi init` writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` (this checkout), the selected `harnesses` (`pi`, `claude`, `codex`), the Pi subagent `provider` profile (`none`, `claude`, `codex`), and `nvim -d` as merge tool. Answers are remembered; run `chezmoi init` again after the config template (`home/.chezmoi.toml.tmpl`) changes. Requirements: chezmoi, Node.js (already required by Pi), and `~/.local/bin` on `PATH`.
+### First adoption on a machine with existing files
+
+- The generated config sets `lessInteractive = true`: `chezmoi apply` asks (diff / overwrite / skip) before replacing any file chezmoi did not write itself, including symlinks such as a linked `~/.pi/agent/AGENTS.md`. Without a terminal it stops instead of overwriting.
+- Before the first apply changes anything, a one-time script backs up every existing managed path to `~/.local/state/pi-dotfiles/adoption-backup-<timestamp>/` (mode 0700, symlinks preserved).
+- Moving from `setup.sh`: rules in `~/.config/pi-dotfiles/local.md` move to `~/.config/chezmoi/local.md`. Rendering stops with an explicit message while the old file exists; if both exist, merge the old rules into the new file and delete the old one.
+
+`chezmoi init` writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` (this checkout), the selected `harnesses` (`pi`, `claude`, `codex`), the Pi subagent `provider` profile (`none`, `claude`, `codex`), and `nvim -d` as merge tool. Answers are remembered; run `chezmoi init` again after the config template (`home/.chezmoi.toml.tmpl`) changes. Requirements: chezmoi >= 2.72.0 (enforced by the config template), Node.js (already required by Pi), and `~/.local/bin` on `PATH`.
 
 ## Daily use
 

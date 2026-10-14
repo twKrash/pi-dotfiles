@@ -7,12 +7,13 @@ command -v chezmoi >/dev/null || { echo 'chezmoi is required (brew install chezm
 TMP=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
-# cz NAME ARGS...: chezmoi with a per-machine config, state, and destination under $TMP/NAME.
+# cz NAME ARGS...: chezmoi with a per-machine HOME, config, state, and destination under $TMP/NAME
+# (source: $SRC, default this checkout).
 cz() {
   name=$1
   shift
   mkdir -p "$TMP/$name/home"
-  chezmoi --source="$ROOT" --destination="$TMP/$name/home" --config="$TMP/$name/chezmoi.toml" \
+  HOME="$TMP/$name/home" chezmoi --source="${SRC:-$ROOT}" --destination="$TMP/$name/home" --config="$TMP/$name/chezmoi.toml" \
     --persistent-state="$TMP/$name/state.boltdb" --cache="$TMP/$name/cache" --no-tty "$@" </dev/null
 }
 # init NAME HARNESSES PROVIDER: non-interactive `chezmoi init` (harnesses separated by /).
@@ -29,13 +30,18 @@ init hybrid pi/claude claude
 grep -qx 'harnesses = \["pi", "claude"\]' "$TMP/hybrid/chezmoi.toml"
 grep -qx 'provider = "claude"' "$TMP/hybrid/chezmoi.toml"
 grep -qx "sourceDir = \"$ROOT\"" "$TMP/hybrid/chezmoi.toml"
+grep -qx 'lessInteractive = true' "$TMP/hybrid/chezmoi.toml"
 LOCAL="$TMP/hybrid/local.md"
 printf '%s\n' '# Local rules' 'local-only rule' >"$LOCAL"
 H="$TMP/hybrid/home"
 # Existing Pi settings: unrelated values, custom packages, and local tool limits survive;
 # an existing empty MEMORY.md is kept (chezmoi removes empty targets unless marked empty_).
-mkdir -p "$H/.pi/agent"
+mkdir -p "$H/.pi/agent/extensions/pi-permission-system"
 : >"$H/.pi/agent/MEMORY.md"
+# Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
+printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
+printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
+ln -s "$TMP/hybrid/linked.md" "$H/.pi/agent/AGENTS.md"
 node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" <<'NODE'
 const fs = require('fs');
 fs.writeFileSync(process.argv[2], JSON.stringify({
@@ -44,7 +50,38 @@ fs.writeFileSync(process.argv[2], JSON.stringify({
 }));
 fs.writeFileSync(process.argv[3], JSON.stringify({mcpServers: {local: {url: 'http://localhost'}}}));
 NODE
-cz hybrid apply
+cp "$H/.pi/agent/settings.json" "$TMP/settings-before.json"
+# First adoption never replaces pre-existing files silently: without a TTY to confirm, apply stops
+# and leaves them alone, after backing every existing managed path up privately.
+if cz hybrid apply >"$TMP/adopt.log" 2>&1; then exit 1; fi
+grep -q '"\*":"deny"' "$H/.pi/agent/extensions/pi-permission-system/config.json"
+test -L "$H/.pi/agent/AGENTS.md"
+cmp "$TMP/settings-before.json" "$H/.pi/agent/settings.json"
+BACKUP=$(find "$H/.local/state/pi-dotfiles" -mindepth 1 -maxdepth 1 -name 'adoption-backup-*')
+test "$(ls -ld "$BACKUP" | cut -c1-10)" = drwx------
+grep -q '"\*":"deny"' "$BACKUP/.pi/agent/extensions/pi-permission-system/config.json"
+test -L "$BACKUP/.pi/agent/AGENTS.md"
+cmp "$TMP/settings-before.json" "$BACKUP/.pi/agent/settings.json"
+# The backup list covers every file and symlink chezmoi manages.
+LIST=$(sed -n 's/^for rel in \(.*\); do$/\1/p' "$ROOT/home/run_once_before_10-backup-existing.sh.tmpl")
+test -n "$LIST"
+cz hybrid managed --include=files,symlinks | while IFS= read -r managed; do
+  covered=0
+  for rel in $LIST; do case "$managed" in "$rel" | "$rel"/*) covered=1 ;; esac; done
+  [ "$covered" -eq 1 ] || { echo "not backed up: $managed" >&2; exit 1; }
+done
+# A legacy setup.sh overlay must be migrated explicitly, never dropped silently.
+mkdir -p "$H/.config/pi-dotfiles"
+printf '%s\n' 'legacy rule' >"$H/.config/pi-dotfiles/local.md"
+if cz hybrid apply --force >"$TMP/legacy-both.log" 2>&1; then exit 1; fi
+grep -q 'both .*pi-dotfiles/local.md' "$TMP/legacy-both.log"
+mv "$LOCAL" "$TMP/local.md.aside"
+if cz hybrid apply --force >"$TMP/legacy.log" 2>&1; then exit 1; fi
+grep -q 'move .*pi-dotfiles/local.md' "$TMP/legacy.log"
+mv "$TMP/local.md.aside" "$LOCAL"
+rm -r "$H/.config/pi-dotfiles"
+# Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state.
+cz hybrid apply --force
 # Plain files are installed as-is; prompt-opt is executable.
 test -x "$H/.local/bin/prompt-opt"
 cmp "$ROOT/home/dot_local/bin/executable_prompt-opt" "$H/.local/bin/prompt-opt"
@@ -134,6 +171,12 @@ if (roles.scout.model !== 'openai-codex/gpt-6-luna') throw new Error('Codex scou
 if (roles.oracle.model !== 'openai-codex/gpt-6.1-sol') throw new Error('Codex oracle profile missing');
 if (s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK added to Codex profile');
 NODE
+
+# Checkout paths with shell metacharacters work in the generated modify_ scripts.
+cp -R "$ROOT" "$TMP/re\$po 'dir"
+SRC="$TMP/re\$po 'dir" init odd-path pi none
+SRC="$TMP/re\$po 'dir" cz odd-path apply
+grep -q 'pi-session-inspector' "$TMP/odd-path/home/.pi/agent/settings.json"
 
 # Claude Code only: no Pi config, prompt-opt, or prompt lab; no subagent profile needed.
 init claude-only claude none
