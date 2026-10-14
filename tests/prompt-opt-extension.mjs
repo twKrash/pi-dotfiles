@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import promptOptExtension from "../agent/extensions/prompt-opt-pi.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const temp = await mkdtemp(path.join(os.tmpdir(), "prompt-opt-extension-"));
+// Keep the caller's prompt-opt defaults out of the assertions.
+for (const name of Object.keys(process.env)) if (/^PROMPT_OPT_(TARGET|RUNNER|PI)_/.test(name)) delete process.env[name];
+const temp = await realpath(await mkdtemp(path.join(os.tmpdir(), "prompt-opt-extension-")));
 const bin = path.join(temp, "bin");
 const argsFile = path.join(temp, "args.txt");
 await mkdir(bin);
@@ -100,7 +102,7 @@ try {
 }
 
 async function testPipedCliCloseAfterCompletion() {
-  const pipeTemp = await mkdtemp(path.join(os.tmpdir(), "prompt-opt-pipe-close-"));
+  const pipeTemp = await realpath(await mkdtemp(path.join(os.tmpdir(), "prompt-opt-pipe-close-")));
   const pipeBin = path.join(pipeTemp, "bin");
   const daemonPidFile = path.join(pipeTemp, "xclip-child.pid");
   const piCallsFile = path.join(pipeTemp, "pi-calls");
