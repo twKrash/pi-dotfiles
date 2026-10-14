@@ -57,11 +57,13 @@ if cz hybrid apply >"$TMP/adopt.log" 2>&1; then exit 1; fi
 grep -q '"\*":"deny"' "$H/.pi/agent/extensions/pi-permission-system/config.json"
 test -L "$H/.pi/agent/AGENTS.md"
 cmp "$TMP/settings-before.json" "$H/.pi/agent/settings.json"
-BACKUP=$(find "$H/.local/state/pi-dotfiles" -mindepth 1 -maxdepth 1 -name 'adoption-backup-*')
+# complete_backup HOME: the one adoption backup with a COMPLETE marker.
+complete_backup() { dirname "$(find "$1/.local/state/pi-dotfiles" -mindepth 2 -maxdepth 2 -name COMPLETE)"; }
+BACKUP=$(complete_backup "$H")
 test "$(ls -ld "$BACKUP" | cut -c1-10)" = drwx------
-grep -q '"\*":"deny"' "$BACKUP/.pi/agent/extensions/pi-permission-system/config.json"
-test -L "$BACKUP/.pi/agent/AGENTS.md"
-cmp "$TMP/settings-before.json" "$BACKUP/.pi/agent/settings.json"
+grep -q '"\*":"deny"' "$BACKUP/paths/.pi/agent/extensions/pi-permission-system/config.json"
+test -L "$BACKUP/paths/.pi/agent/AGENTS.md"
+cmp "$TMP/settings-before.json" "$BACKUP/paths/.pi/agent/settings.json"
 # The backup list covers every file and symlink chezmoi manages.
 LIST=$(sed -n 's/^for rel in \(.*\); do$/\1/p' "$ROOT/home/run_once_before_10-backup-existing.sh.tmpl")
 test -n "$LIST"
@@ -171,6 +173,47 @@ if (roles.scout.model !== 'openai-codex/gpt-6-luna') throw new Error('Codex scou
 if (roles.oracle.model !== 'openai-codex/gpt-6.1-sol') throw new Error('Codex oracle profile missing');
 if (s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK added to Codex profile');
 NODE
+
+# A parent that is a symlink or a plain file is saved as-is (chezmoi would replace it with a directory),
+# and nothing is copied through it.
+init parents pi/claude none
+P="$TMP/parents/home"
+mkdir -p "$TMP/parents/elsewhere"
+printf '%s\n' 'original claude rules' >"$TMP/parents/elsewhere/CLAUDE.md"
+ln -s "$TMP/parents/elsewhere" "$P/.claude"
+printf '%s\n' 'ai is a file' >"$P/ai"
+if cz parents apply >/dev/null 2>&1; then exit 1; fi
+test -L "$P/.claude"
+grep -qx 'ai is a file' "$P/ai"
+PB=$(complete_backup "$P")
+test -L "$PB/ancestors/.claude"
+test "$(readlink "$PB/ancestors/.claude")" = "$TMP/parents/elsewhere"
+test ! -e "$PB/paths/.claude"
+grep -qx 'ai is a file' "$PB/ancestors/ai"
+cz parents apply --force
+grep -qx 'original claude rules' "$TMP/parents/elsewhere/CLAUDE.md"
+
+# A failed backup attempt is never reused: the retry gets a fresh directory, and only it is COMPLETE
+# (no directory nesting from copying into a partial snapshot). A fixed `date` makes both attempts
+# share one timestamp, the case where a timestamp-named directory would be reused.
+mkdir -p "$TMP/fixed-date"
+printf '#!/bin/sh\necho 20260101000000\n' >"$TMP/fixed-date/date"
+chmod +x "$TMP/fixed-date/date"
+init retry pi none
+Y="$TMP/retry/home"
+mkdir -p "$Y/ai/prompt_engineering" "$Y/.pi/agent"
+printf '%s\n' 'my lab' >"$Y/ai/prompt_engineering/AGENTS.md"
+printf '%s\n' 'my memory' >"$Y/.pi/agent/MEMORY.md"
+chmod 000 "$Y/.pi/agent/MEMORY.md"
+if (PATH="$TMP/fixed-date:$PATH" && export PATH && cz retry apply >/dev/null 2>&1); then chmod 644 "$Y/.pi/agent/MEMORY.md"; exit 1; fi
+chmod 644 "$Y/.pi/agent/MEMORY.md"
+if (PATH="$TMP/fixed-date:$PATH" && export PATH && cz retry apply >/dev/null 2>&1); then exit 1; fi
+test "$(find "$Y/.local/state/pi-dotfiles" -mindepth 1 -maxdepth 1 -name 'adoption-backup-*' | wc -l)" -eq 2
+test "$(find "$Y/.local/state/pi-dotfiles" -mindepth 2 -maxdepth 2 -name COMPLETE | wc -l)" -eq 1
+YB=$(complete_backup "$Y")
+grep -qx 'my lab' "$YB/paths/ai/prompt_engineering/AGENTS.md"
+test ! -e "$YB/paths/ai/prompt_engineering/prompt_engineering"
+grep -qx 'my memory' "$YB/paths/.pi/agent/MEMORY.md"
 
 # Checkout paths with shell metacharacters work in the generated modify_ scripts.
 cp -R "$ROOT" "$TMP/re\$po 'dir"
