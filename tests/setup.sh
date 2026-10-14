@@ -2,7 +2,10 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMP=$(mktemp -d)
+# Keep the caller's prompt-opt defaults out of the assertions.
+unset PROMPT_LAB_DIR PROMPT_OPT_TARGET_PROVIDER PROMPT_OPT_TARGET_MODEL PROMPT_OPT_TARGET_EFFORT PROMPT_OPT_TARGET_ENVIRONMENT \
+  PROMPT_OPT_RUNNER_PROVIDER PROMPT_OPT_RUNNER_MODEL PROMPT_OPT_RUNNER_EFFORT PROMPT_OPT_PI_PROVIDER PROMPT_OPT_PI_MODEL PROMPT_OPT_PI_EFFORT
+TMP=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 HOME="$TMP/home"
 export HOME
@@ -62,7 +65,7 @@ cat >"$TMP/mock-bin/pi" <<'MOCK_PI'
 if [ "${1:-}" = --version ]; then echo "${PI_VERSION:-1.1.0}"; exit 0; fi
 echo "pi-called" >>"$PI_CALLS"
 if [ -n "${MUTATE_LAB:-}" ]; then printf '%s\n' changed >>"$MUTATE_LAB/.runtime-change"; fi
-call_count=$(wc -l <"$PI_CALLS")
+call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
 printf 'optimized-%s\n' "$call_count"
 MOCK_PI
 cat >"$TMP/mock-bin/xclip" <<'MOCK_XCLIP'
@@ -110,6 +113,14 @@ cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-cached.out"
 cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-clipboard.out"
 grep -q 'phase=cache_hit' "$TMP/pbcopy-cached.log"
 test "$(wc -l <"$TMP/pbcopy-calls")" -eq 2
+# A symlinked TMPDIR (macOS /var -> /private/var) must not break history writes.
+mkdir "$TMP/real-tmpdir"
+ln -s "$TMP/real-tmpdir" "$TMP/link-tmpdir"
+printf 'symlinked tmpdir task\n' >"$TMP/symlink-tmpdir-request.md"
+TMPDIR="$TMP/link-tmpdir" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/symlink-tmpdir-calls" \
+  PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/symlink-tmpdir-state" \
+  "$ROOT/bin/prompt-opt" "$TMP/symlink-tmpdir-request.md" >"$TMP/symlink-tmpdir.out"
+grep -qx 'optimized-1' "$TMP/symlink-tmpdir.out"
 # Exact-byte history is immutable and repeated requests should be served without Pi.
 PI_CALLS="$TMP/pi-calls"
 export PI_CALLS
@@ -414,7 +425,7 @@ grep -q 'phase=pi_start' "$TMP/prompt-run.log"
 grep -q 'phase=pi_complete status=0' "$TMP/prompt-run.log"
 grep -q 'phase=clipboard_complete' "$TMP/prompt-run.log"
 grep -q 'phase=complete' "$TMP/prompt-run.log"
-node --experimental-default-type=module "$ROOT/tests/prompt-opt-extension.mjs"
+node "$ROOT/tests/prompt-opt-extension.mjs"
 for file in AGENTS.md prompt_engineering.md prompting-references.md prompt-optimization-playbook.md; do
   test -f "$HOME/ai/prompt_engineering/$file"
   cmp "$ROOT/prompt_engineering/$file" "$HOME/ai/prompt_engineering/$file"

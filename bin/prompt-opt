@@ -275,7 +275,8 @@ copy_to_clipboard() {
 
 command -v pi >/dev/null || die 'pi is not available in PATH'
 pi_executable=$(command -v pi)
-work_dir=$(mktemp -d)
+# Resolve symlinks: macOS mktemp returns /var/..., and the history helper rejects symlinked paths.
+work_dir=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf -- "$work_dir"' EXIT
 request="$work_dir/request.md"
 answer="$work_dir/answer.md"
