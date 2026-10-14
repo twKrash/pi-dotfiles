@@ -21,8 +21,11 @@ cmp "$ROOT/bin/prompt-opt" "$HOME/.local/bin/prompt-opt"
 test -f "$HOME/.local/bin/prompt-opt-history.mjs"
 cmp "$ROOT/bin/prompt-opt-history.mjs" "$HOME/.local/bin/prompt-opt-history.mjs"
 test -f "$AGENT/extensions/prompt-opt-pi.js"
-cmp "$ROOT/agent/AGENTS.md" "$AGENT/AGENTS.md"
-cmp "$ROOT/agent/APPEND_SYSTEM.md" "$AGENT/APPEND_SYSTEM.md"
+# Pi defaults live in the always-loaded global AGENTS.md, not APPEND_SYSTEM.md (a project .pi/APPEND_SYSTEM.md replaces it).
+{ cat "$ROOT/agent/AGENTS.md"; printf '\n'; cat "$ROOT/agent/AGENTS.pi.md"; } >"$TMP/expected-agents.md"
+cmp "$TMP/expected-agents.md" "$AGENT/AGENTS.md"
+grep -q 'pi-subagents' "$AGENT/AGENTS.md"
+test ! -e "$AGENT/APPEND_SYSTEM.md"
 test ! -e "$ROOT/agent/skills/prompt-engineering/SKILL.md"
 for file in prompt_engineering.md prompting-references.md prompt-optimization-playbook.md; do
   test ! -e "$ROOT/agent/skills/prompt-engineering/references/$file"

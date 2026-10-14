@@ -113,13 +113,18 @@ copy_tree() {
 copy_one "$ROOT/bin/prompt-opt" "$HOME/.local/bin/prompt-opt"
 copy_one "$ROOT/bin/prompt-opt-history.mjs" "$HOME/.local/bin/prompt-opt-history.mjs"
 copy_tree "$ROOT/prompt_engineering" "$HOME/ai/prompt_engineering"
-copy_one "$ROOT/agent/AGENTS.md" "$AGENT_DIR/AGENTS.md"
-copy_one "$ROOT/agent/APPEND_SYSTEM.md" "$AGENT_DIR/APPEND_SYSTEM.md"
 copy_one "$ROOT/agent/MEMORY.md.template" "$AGENT_DIR/MEMORY.md" yes
 copy_tree "$ROOT/agent/extensions" "$AGENT_DIR/extensions"
 
 skill_tmp=$(mktemp)
-trap 'rm -f "$skill_tmp"' EXIT HUP INT TERM
+agents_tmp=$(mktemp)
+trap 'rm -f "$skill_tmp" "$agents_tmp"' EXIT HUP INT TERM
+# Pi always loads the global AGENTS.md, but a trusted project's .pi/APPEND_SYSTEM.md
+# replaces the global one, so the Pi addendum is installed inside AGENTS.md.
+{ cat "$ROOT/agent/AGENTS.md"; printf '\n'; cat "$ROOT/agent/AGENTS.pi.md"; } >"$agents_tmp"
+chmod 644 "$agents_tmp"
+copy_one "$agents_tmp" "$AGENT_DIR/AGENTS.md"
+rm -f "$agents_tmp"
 {
   cat <<'SKILL_HEADER'
 ---
