@@ -1,0 +1,414 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# Keep the caller's prompt-opt defaults out of the assertions.
+unset PROMPT_LAB_DIR PROMPT_OPT_TARGET_PROVIDER PROMPT_OPT_TARGET_MODEL PROMPT_OPT_TARGET_EFFORT PROMPT_OPT_TARGET_ENVIRONMENT \
+  PROMPT_OPT_RUNNER_PROVIDER PROMPT_OPT_RUNNER_MODEL PROMPT_OPT_RUNNER_EFFORT PROMPT_OPT_PI_PROVIDER PROMPT_OPT_PI_MODEL PROMPT_OPT_PI_EFFORT
+TMP=$(cd "$(mktemp -d)" && pwd -P)
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+HOME="$TMP/home"
+export HOME
+PROMPT_OPT="$ROOT/home/dot_local/bin/executable_prompt-opt"
+HISTORY_HELPER="$ROOT/home/dot_local/bin/prompt-opt-history.mjs"
+LAB="$ROOT/home/ai/prompt_engineering"
+
+# Provider-only overrides reset incompatible inherited target-model defaults.
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state" \
+  PROMPT_OPT_TARGET_MODEL=opus-5.5 "$PROMPT_OPT" --provider=openai --show-config >"$TMP/prompt-config.log"
+grep -q 'Target: *provider=openai model=luna ' "$TMP/prompt-config.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/sol-alias-state" \
+  "$PROMPT_OPT" --model=sol --show-config >"$TMP/sol-alias-config.log"
+grep -q 'Target: *provider=openai model=gpt-6.1-sol ' "$TMP/sol-alias-config.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/sol-6-alias-state" \
+  "$PROMPT_OPT" --model=sol-6 --show-config >"$TMP/sol-6-alias-config.log"
+grep -q 'Target: *provider=openai model=gpt-6-sol ' "$TMP/sol-6-alias-config.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/sol-6.1-alias-state" \
+  "$PROMPT_OPT" --opt-model=sol-6.1 --show-config >"$TMP/sol-6.1-alias-config.log"
+grep -q 'Optimizer: *provider=openai model=gpt-6.1-sol ' "$TMP/sol-6.1-alias-config.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-opt-effort-state" \
+  "$PROMPT_OPT" --opt-effort=medium --show-config >"$TMP/prompt-config-opt-effort.log"
+grep -q 'Optimizer: *provider=openai model=gpt-6-luna thinking=medium' "$TMP/prompt-config-opt-effort.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state-verbose" \
+  "$PROMPT_OPT" --verbose --show-config >"$TMP/prompt-config-verbose.log" 2>"$TMP/prompt-verbose.log"
+grep -q 'prompt-opt\[debug\].*phase=config' "$TMP/prompt-verbose.log"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state-debug" \
+  "$PROMPT_OPT" --debug --show-config >"$TMP/prompt-config-debug.log" 2>"$TMP/prompt-debug.log"
+grep -q 'prompt-opt\[debug\].*phase=config' "$TMP/prompt-debug.log"
+mkdir -p "$TMP/mock-bin"
+cat >"$TMP/mock-bin/pi" <<'MOCK_PI'
+#!/bin/sh
+if [ "${1:-}" = --version ]; then echo "${PI_VERSION:-1.1.0}"; exit 0; fi
+echo "pi-called" >>"$PI_CALLS"
+if [ -n "${PI_ARGS:-}" ]; then printf '%s\n' "$@" >"$PI_ARGS"; fi
+if [ -n "${MUTATE_LAB:-}" ]; then printf '%s\n' changed >>"$MUTATE_LAB/.runtime-change"; fi
+call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
+printf 'optimized-%s\n' "$call_count"
+MOCK_PI
+cat >"$TMP/mock-bin/xclip" <<'MOCK_XCLIP'
+#!/bin/sh
+cat >"${CLIP_CAPTURE:-/dev/null}"
+if [ "${FAIL_CLIPBOARD:-0}" = 1 ]; then exit 1; fi
+MOCK_XCLIP
+chmod +x "$TMP/mock-bin/pi" "$TMP/mock-bin/xclip"
+# --last settings loading must work without Bash 4's mapfile builtin.
+LAST_STATE="$TMP/last-settings-state/prompt-opt"
+mkdir -p "$LAST_STATE"
+printf '%s\n' openai sol low pi openai-codex gpt-6-luna medium >"$LAST_STATE/last-settings.txt"
+PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/last-settings-state" \
+  bash -c 'enable -n mapfile 2>/dev/null || :; source "$0" --last --show-config' "$PROMPT_OPT" >"$TMP/last-settings-config.log"
+grep -q 'Target: *provider=openai model=gpt-6.1-sol effort=low environment=pi' "$TMP/last-settings-config.log"
+grep -q 'Optimizer: *provider=openai-codex model=gpt-6-luna thinking=medium' "$TMP/last-settings-config.log"
+# With no xclip in PATH, both fresh and cached clipboard writes must use pbcopy.
+PBCOPY_BIN="$TMP/pbcopy-bin"
+mkdir -p "$PBCOPY_BIN"
+for tool in bash node dirname mktemp rm cp grep head wc tr cat; do
+  ln -s "$(command -v "$tool")" "$PBCOPY_BIN/$tool"
+done
+cat >"$PBCOPY_BIN/pi" <<'PBCOPY_PI'
+#!/bin/sh
+if [ "${1:-}" = --version ]; then echo 1.1.0; exit 0; fi
+printf 'optimized-pbcopy\n'
+PBCOPY_PI
+cat >"$PBCOPY_BIN/pbcopy" <<'PBCOPY_CLIPBOARD'
+#!/bin/sh
+cat >"$CLIP_CAPTURE"
+printf 'called\n' >>"$PB_COPY_CALLS"
+PBCOPY_CLIPBOARD
+chmod +x "$PBCOPY_BIN/pi" "$PBCOPY_BIN/pbcopy"
+printf 'pbcopy task\n' >"$TMP/pbcopy-request.md"
+printf 'optimized-pbcopy\n' >"$TMP/pbcopy-expected.out"
+PATH="$PBCOPY_BIN" CLIP_CAPTURE="$TMP/pbcopy-clipboard.out" PB_COPY_CALLS="$TMP/pbcopy-calls" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/pbcopy-state" \
+  "$PROMPT_OPT" --debug "$TMP/pbcopy-request.md" >"$TMP/pbcopy-first.out" 2>"$TMP/pbcopy-first.log"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-first.out"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-clipboard.out"
+PATH="$PBCOPY_BIN" CLIP_CAPTURE="$TMP/pbcopy-clipboard.out" PB_COPY_CALLS="$TMP/pbcopy-calls" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/pbcopy-state" \
+  "$PROMPT_OPT" --debug "$TMP/pbcopy-request.md" >"$TMP/pbcopy-cached.out" 2>"$TMP/pbcopy-cached.log"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-cached.out"
+cmp "$TMP/pbcopy-expected.out" "$TMP/pbcopy-clipboard.out"
+grep -q 'phase=cache_hit' "$TMP/pbcopy-cached.log"
+test "$(wc -l <"$TMP/pbcopy-calls")" -eq 2
+# A symlinked TMPDIR (macOS /var -> /private/var) must not break history writes.
+mkdir "$TMP/real-tmpdir"
+ln -s "$TMP/real-tmpdir" "$TMP/link-tmpdir"
+printf 'symlinked tmpdir task\n' >"$TMP/symlink-tmpdir-request.md"
+TMPDIR="$TMP/link-tmpdir" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/symlink-tmpdir-calls" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/symlink-tmpdir-state" \
+  "$PROMPT_OPT" "$TMP/symlink-tmpdir-request.md" >"$TMP/symlink-tmpdir.out"
+grep -qx 'optimized-1' "$TMP/symlink-tmpdir.out"
+# The optimizer run must see only the lab instructions, not global/ancestor AGENTS.md.
+printf 'context isolation task\n' >"$TMP/isolation-request.md"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/isolation-calls" PI_ARGS="$TMP/isolation-args" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/isolation-state" \
+  "$PROMPT_OPT" "$TMP/isolation-request.md" >/dev/null
+grep -qx -- '--no-context-files' "$TMP/isolation-args"
+grep -A1 -x -- '--append-system-prompt' "$TMP/isolation-args" | tail -n 1 | grep -qx "$LAB/AGENTS.md"
+# Exact-byte history is immutable and repeated requests should be served without Pi.
+PI_CALLS="$TMP/pi-calls"
+export PI_CALLS
+printf 'sample task\n' >"$TMP/request.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" "$TMP/request.md" >"$TMP/history-first.out"
+REQUEST_HASH=$(sha256sum "$TMP/request.md" | cut -d' ' -f1)
+MODERN_RECORD=$(find "$TMP/history-state/prompt-opt/history/$REQUEST_HASH" -mindepth 3 -maxdepth 3 -name metadata.json | head -n 1)
+test -n "$MODERN_RECORD"
+MODERN_RECORD_DIR=$(dirname "$MODERN_RECORD")
+cp "$MODERN_RECORD_DIR/original.md" "$TMP/modern-record-original"
+cp "$MODERN_RECORD_DIR/optimized.md" "$TMP/modern-record-optimized"
+cp "$MODERN_RECORD_DIR/metadata.json" "$TMP/modern-record-metadata"
+PATH="$TMP/mock-bin:$PATH" CLIP_CAPTURE="$TMP/cache-clipboard.out" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" "$TMP/request.md" >"$TMP/history-second.out" 2>/dev/null
+cmp "$TMP/modern-record-original" "$MODERN_RECORD_DIR/original.md"
+cmp "$TMP/modern-record-optimized" "$MODERN_RECORD_DIR/optimized.md"
+cmp "$TMP/modern-record-metadata" "$MODERN_RECORD_DIR/metadata.json"
+test "$(wc -l <"$PI_CALLS")" -eq 1
+printf 'second request\n' >"$TMP/other-request.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" "$TMP/other-request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 2
+grep -q 'optimized-1' "$TMP/cache-clipboard.out"
+grep -q 'optimized-1' "$TMP/history-state/prompt-opt/last-output.md"
+cmp "$TMP/request.md" "$TMP/history-state/prompt-opt/last-successful-input.md"
+test "$(wc -l <"$TMP/history-state/prompt-opt/last-successful-settings.txt")" -eq 7
+# --no-cache forces a new immutable result rather than reusing the hit.
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --no-cache "$TMP/request.md" >/dev/null 2>&1
+cmp "$TMP/modern-record-original" "$MODERN_RECORD_DIR/original.md"
+cmp "$TMP/modern-record-optimized" "$MODERN_RECORD_DIR/optimized.md"
+cmp "$TMP/modern-record-metadata" "$MODERN_RECORD_DIR/metadata.json"
+test "$(wc -l <"$PI_CALLS")" -eq 3
+cmp "$TMP/request.md" "$TMP/history-state/prompt-opt/last-successful-input.md"
+cmp "$TMP/request.md" "$TMP/history-state/prompt-opt/last-input.md"
+test "$(wc -l <"$TMP/history-state/prompt-opt/last-successful-settings.txt")" -eq 7
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --history "$(sha256sum "$TMP/request.md" | cut -d' ' -f1)" >"$TMP/history-show.out"
+grep -q 'original' "$TMP/history-show.out"
+grep -q 'optimized-' "$TMP/history-show.out"
+# Malformed siblings and symlinked entries must not hide valid history or mutate outside targets.
+HISTORY_DIR="$TMP/history-state/prompt-opt/history"
+mkdir -p "$HISTORY_DIR/badhash/unverified/bad-record"
+printf '{broken' >"$HISTORY_DIR/badhash/unverified/bad-record/metadata.json"
+printf 'outside sentinel' >"$TMP/outside"
+ln -s "$TMP/outside" "$HISTORY_DIR/outside-link"
+if PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --history >"$TMP/history-list.out" 2>"$TMP/history-list.err"; then :; else echo 'history listing failed' >&2; exit 1; fi
+grep -q 'sample task' "$TMP/history-show.out"
+test -f "$HISTORY_DIR/badhash/unverified/bad-record/metadata.json"
+test "$(cat "$TMP/outside")" = 'outside sentinel'
+# Valid-shaped records with invalid settings are ignored, not fatal.
+BAD_SETTINGS="$HISTORY_DIR/$(sha256sum "$TMP/request.md" | cut -d' ' -f1)/unverified/bad-settings"
+mkdir -p "$BAD_SETTINGS"
+cp "$TMP/request.md" "$BAD_SETTINGS/original.md"
+printf 'bad optimized' >"$BAD_SETTINGS/optimized.md"
+node - "$BAD_SETTINGS/metadata.json" "$BAD_SETTINGS/optimized.md" "$TMP/request.md" <<'NODE'
+const fs=require('fs'),crypto=require('crypto'),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const out=fs.readFileSync(process.argv[3]),req=fs.readFileSync(process.argv[4]);
+fs.writeFileSync(process.argv[2],JSON.stringify({schema:1,compatibility:'unverified',settings:'bad',request_sha256:hash(req),optimized_sha256:hash(out)}));
+NODE
+# A symlinked record body must be skipped even if its claimed digest matches.
+REQ_HASH=$(sha256sum "$TMP/request.md" | cut -d' ' -f1)
+EVIL="$HISTORY_DIR/$REQ_HASH/unverified/evil-record"
+mkdir -p "$EVIL"
+cp "$TMP/request.md" "$EVIL/original.md"
+ln -s "$TMP/outside" "$EVIL/optimized.md"
+node - "$EVIL/metadata.json" "$TMP/outside" "$REQ_HASH" <<'NODE'
+const fs=require('fs'),crypto=require('crypto'),m={schema:1,compatibility:'unverified',settings:Array(7).fill('x'),request_sha256:process.argv[4]};
+m.optimized_sha256=crypto.createHash('sha256').update(fs.readFileSync(process.argv[3])).digest('hex');
+fs.writeFileSync(process.argv[2],JSON.stringify(m));
+NODE
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --history "$REQ_HASH" >"$TMP/history-symlink.out" 2>/dev/null
+if grep -q 'outside sentinel' "$TMP/history-symlink.out"; then echo 'symlinked record was read' >&2; exit 1; fi
+test -f "$EVIL/metadata.json"
+# CLI must reject mutable-state symlinks before Pi or any write.
+mkdir -p "$TMP/state-symlink-target/prompt-opt" "$TMP/state-file-link/prompt-opt"
+printf 'keep sentinel' >"$TMP/state-symlink-target/prompt-opt/last-output.md"
+ln -s "$TMP/state-symlink-target/prompt-opt/last-output.md" "$TMP/state-file-link/prompt-opt/last-output.md"
+CALLS_BEFORE_SYMLINK=$(wc -l <"$PI_CALLS")
+if PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/state-file-link" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1; then echo 'symlinked mutable file accepted' >&2; exit 1; fi
+test "$(cat "$TMP/state-symlink-target/prompt-opt/last-output.md")" = 'keep sentinel'
+test "$(wc -l <"$PI_CALLS")" -eq "$CALLS_BEFORE_SYMLINK"
+ln -s "$TMP/state-symlink-target" "$TMP/state-dir-link"
+if PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/state-dir-link" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1; then echo 'symlinked state directory accepted' >&2; exit 1; fi
+test "$(wc -l <"$PI_CALLS")" -eq "$CALLS_BEFORE_SYMLINK"
+# Saving through a symlinked history ancestor must not create outside records.
+mkdir -p "$TMP/outside-history"
+mkdir -p "$TMP/hostile-state/prompt-opt"
+ln -s "$TMP/outside-history" "$TMP/hostile-state/prompt-opt/history"
+printf 'answer' >"$TMP/answer.md"
+node - "$TMP/save-meta.json" <<'NODE'
+const fs=require('fs');fs.writeFileSync(process.argv[2],JSON.stringify({compatibility:'unverified',settings:Array(7).fill('x')}));
+NODE
+if node "$HISTORY_HELPER" save "$TMP/hostile-state/prompt-opt" "$TMP/request.md" "$TMP/answer.md" "$TMP/save-meta.json" >/dev/null 2>&1; then echo 'save followed history symlink' >&2; exit 1; fi
+test -z "$(find "$TMP/outside-history" -mindepth 1 -print -quit)"
+if "$PROMPT_OPT" --history=not-a-hash >"$TMP/bad-hash.out" 2>&1; then echo 'invalid history hash accepted' >&2; exit 1; fi
+grep -q 'invalid history hash' "$TMP/bad-hash.out"
+if "$PROMPT_OPT" --history "$TMP/request.md" >"$TMP/history-conflict.out" 2>&1; then echo 'history/input conflict accepted' >&2; exit 1; fi
+grep -q 'conflicting input mode' "$TMP/history-conflict.out"
+# Settings variants are retained independently for the same exact request.
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --effort=low "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 4
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/history-state" "$PROMPT_OPT" --history "$(sha256sum "$TMP/request.md" | cut -d' ' -f1)" >"$TMP/history-variants.out"
+test "$(grep -c '^===' "$TMP/history-variants.out")" -eq 6
+# Source and Pi-version changes must miss the cache; unusable versions never cache.
+mkdir -p "$TMP/lab"
+printf 'lab instructions\n' >"$TMP/lab/AGENTS.md"
+printf 'lab source\n' >"$TMP/lab/guide.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/invalidation-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+printf 'changed source\n' >>"$TMP/lab/guide.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/invalidation-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 6
+PATH="$TMP/mock-bin:$PATH" PI_VERSION=1.1.0 PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/version-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" PI_VERSION=1.2.0 PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/version-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" PI_VERSION=1.2.0 PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/version-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 8
+PATH="$TMP/mock-bin:$PATH" PI_VERSION=invalid PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/invalid-version-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" PI_VERSION=invalid PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/invalid-version-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 10
+# Empty lab directories are part of the source fingerprint.
+FP_BEFORE=$(node "$HISTORY_HELPER" fingerprint "$TMP/lab" 1.1.0 openai luna high pi openai-codex gpt-6-luna high)
+mkdir "$TMP/lab/empty-folder"
+FP_ADDED=$(node "$HISTORY_HELPER" fingerprint "$TMP/lab" 1.1.0 openai luna high pi openai-codex gpt-6-luna high)
+test "$FP_BEFORE" != "$FP_ADDED"
+rmdir "$TMP/lab/empty-folder"
+# A lab mutation during optimization produces an unverified record; restoring the source must still miss.
+MUTATE_LAB="$TMP/lab" PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/mutating-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+rm -f "$TMP/lab/.runtime-change"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/mutating-state" "$PROMPT_OPT" "$TMP/request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq 12
+# Legacy layouts/snapshots are archived before any mutable state write.
+LAYOUT="$TMP/layout-state/prompt-opt"
+mkdir -p "$LAYOUT"
+printf 'draft bytes\001' >"$LAYOUT/last-input.md"
+printf 'successful bytes\002' >"$LAYOUT/last-successful-input.md"
+printf 'legacy layout output\003' >"$LAYOUT/last-output.md"
+printf 'draft settings\004' >"$LAYOUT/last-settings.txt"
+printf 'success settings\005' >"$LAYOUT/last-successful-settings.txt"
+cp "$LAYOUT/last-input.md" "$TMP/legacy-layout-draft"
+cp "$LAYOUT/last-successful-input.md" "$TMP/legacy-layout-success"
+cp "$LAYOUT/last-output.md" "$TMP/legacy-layout-output"
+cp "$LAYOUT/last-settings.txt" "$TMP/legacy-draft-settings"
+cp "$LAYOUT/last-successful-settings.txt" "$TMP/legacy-success-settings"
+DRAFT_HASH=$(sha256sum "$LAYOUT/last-input.md" | cut -d' ' -f1)
+SUCCESS_HASH=$(sha256sum "$LAYOUT/last-successful-input.md" | cut -d' ' -f1)
+printf 'fresh task\n' >"$TMP/fresh-request.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/layout-state" "$PROMPT_OPT" "$TMP/fresh-request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/layout-state" "$PROMPT_OPT" --history "$DRAFT_HASH" >"$TMP/layout-draft.out"
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/layout-state" "$PROMPT_OPT" --history "$SUCCESS_HASH" >"$TMP/layout-success.out"
+grep -q 'draft bytes' "$TMP/layout-draft.out"
+grep -q 'successful bytes' "$TMP/layout-success.out"
+grep -q 'legacy layout output' "$TMP/layout-draft.out"
+grep -q 'legacy layout output' "$TMP/layout-draft.out"
+cmp "$TMP/legacy-layout-draft" "$(find "$LAYOUT/history/$DRAFT_HASH/unverified" -type f -name original.md | head -n 1)"
+cmp "$TMP/legacy-layout-success" "$(find "$LAYOUT/history/$SUCCESS_HASH/unverified" -type f -name original.md | head -n 1)"
+cmp "$TMP/legacy-layout-output" "$(find "$LAYOUT/history/$DRAFT_HASH/unverified" -type f -name optimized.md | head -n 1)"
+cmp "$TMP/legacy-layout-output" "$(find "$LAYOUT/history/$SUCCESS_HASH/unverified" -type f -name optimized.md | head -n 1)"
+cmp "$TMP/legacy-draft-settings" "$(find "$LAYOUT/history/$DRAFT_HASH/unverified" -type f -name last-settings.txt | head -n 1)"
+cmp "$TMP/legacy-success-settings" "$(find "$LAYOUT/history/$SUCCESS_HASH/unverified" -type f -name last-successful-settings.txt | head -n 1)"
+# A complete-looking record with invalid settings cannot suppress the replacement archive.
+INVALID_ARCHIVE="$TMP/invalid-dedup-state/prompt-opt"
+mkdir -p "$INVALID_ARCHIVE"
+printf 'legacy request\001' >"$INVALID_ARCHIVE/last-input.md"
+printf 'legacy optimized\002' >"$INVALID_ARCHIVE/last-output.md"
+INVALID_HASH=$(sha256sum "$INVALID_ARCHIVE/last-input.md" | cut -d' ' -f1)
+INVALID_RECORD="$INVALID_ARCHIVE/history/$INVALID_HASH/unverified/legacy-corrupt-settings"
+mkdir -p "$INVALID_RECORD"
+cp "$INVALID_ARCHIVE/last-input.md" "$INVALID_RECORD/original.md"
+cp "$INVALID_ARCHIVE/last-output.md" "$INVALID_RECORD/optimized.md"
+node - "$INVALID_RECORD/metadata.json" "$INVALID_RECORD/original.md" "$INVALID_RECORD/optimized.md" <<'NODE'
+const fs=require('fs'),crypto=require('crypto'),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const original=fs.readFileSync(process.argv[3]),output=fs.readFileSync(process.argv[4]);
+fs.writeFileSync(process.argv[2],JSON.stringify({schema:1,compatibility:'unverified',settings:'bad',request_sha256:hash(original),optimized_sha256:hash(output),origin:'legacy',legacy_settings:[]}));
+NODE
+cp "$INVALID_RECORD/metadata.json" "$TMP/invalid-record-metadata"
+cp "$INVALID_RECORD/original.md" "$TMP/invalid-record-original"
+cp "$INVALID_RECORD/optimized.md" "$TMP/invalid-record-optimized"
+printf 'replacement request\n' >"$TMP/replacement-request.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/invalid-dedup-state" "$PROMPT_OPT" "$TMP/replacement-request.md" >/dev/null 2>&1
+cmp "$TMP/invalid-record-metadata" "$INVALID_RECORD/metadata.json"
+cmp "$TMP/invalid-record-original" "$INVALID_RECORD/original.md"
+cmp "$TMP/invalid-record-optimized" "$INVALID_RECORD/optimized.md"
+INVALID_RECORD_COUNT=$(find "$INVALID_ARCHIVE/history/$INVALID_HASH/unverified" -mindepth 1 -maxdepth 1 -type d | wc -l)
+test "$INVALID_RECORD_COUNT" -eq 2
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/invalid-dedup-state" "$PROMPT_OPT" --history "$INVALID_HASH" >"$TMP/invalid-dedup-history.out"
+grep -q 'legacy optimized' "$TMP/invalid-dedup-history.out"
+# The older draft-only layout remains recoverable when successful-input is absent.
+DRAFT_ONLY="$TMP/draft-only-state/prompt-opt"
+mkdir -p "$DRAFT_ONLY"
+printf 'draft only raw' >"$DRAFT_ONLY/last-input.md"
+printf 'draft only output' >"$DRAFT_ONLY/last-output.md"
+DRAFT_ONLY_HASH=$(sha256sum "$DRAFT_ONLY/last-input.md" | cut -d' ' -f1)
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/draft-only-state" "$PROMPT_OPT" "$TMP/fresh-request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/draft-only-state" "$PROMPT_OPT" --history "$DRAFT_ONLY_HASH" >"$TMP/draft-only-show.out"
+grep -q 'draft only raw' "$TMP/draft-only-show.out"
+grep -q 'draft only output' "$TMP/draft-only-show.out"
+# Incomplete deterministic archive is retained while a complete exclusive record is added.
+BROKEN_STATE="$TMP/broken-archive-state/prompt-opt"
+mkdir -p "$BROKEN_STATE"
+printf 'broken request' >"$BROKEN_STATE/last-input.md"
+printf 'broken request' >"$BROKEN_STATE/last-successful-input.md"
+printf 'broken output' >"$BROKEN_STATE/last-output.md"
+BROKEN_HASH=$(sha256sum "$BROKEN_STATE/last-successful-input.md" | cut -d' ' -f1)
+BROKEN_ID="legacy-$(sha256sum "$BROKEN_STATE/last-output.md" | cut -d' ' -f1 | cut -c1-16)"
+mkdir -p "$BROKEN_STATE/history/$BROKEN_HASH/unverified/$BROKEN_ID"
+printf 'corrupt metadata preserved' >"$BROKEN_STATE/history/$BROKEN_HASH/unverified/$BROKEN_ID/metadata.json"
+printf 'do not overwrite' >"$BROKEN_STATE/history/$BROKEN_HASH/unverified/$BROKEN_ID/sentinel"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/broken-archive-state" "$PROMPT_OPT" "$TMP/fresh-request.md" >/dev/null 2>&1
+test "$(cat "$BROKEN_STATE/history/$BROKEN_HASH/unverified/$BROKEN_ID/metadata.json")" = 'corrupt metadata preserved'
+test "$(cat "$BROKEN_STATE/history/$BROKEN_HASH/unverified/$BROKEN_ID/sentinel")" = 'do not overwrite'
+BROKEN_RECORDS=$(find "$BROKEN_STATE/history/$BROKEN_HASH/unverified" -mindepth 1 -maxdepth 1 -type d | wc -l)
+test "$BROKEN_RECORDS" -eq 2
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/broken-archive-state" "$PROMPT_OPT" --history "$BROKEN_HASH" >"$TMP/broken-archive-show.out"
+grep -q 'broken output' "$TMP/broken-archive-show.out"
+# Required legacy bytes plus an unarchivable history root must abort before mutable-state changes.
+FAIL_STATE="$TMP/archive-failure-state/prompt-opt"
+mkdir -p "$FAIL_STATE"
+printf 'keep old draft' >"$FAIL_STATE/last-input.md"
+printf 'keep old success' >"$FAIL_STATE/last-successful-input.md"
+printf 'keep old output' >"$FAIL_STATE/last-output.md"
+printf 'keep settings raw' >"$FAIL_STATE/last-settings.txt"
+printf 'keep success settings raw' >"$FAIL_STATE/last-successful-settings.txt"
+printf 'not a directory' >"$FAIL_STATE/history"
+cp -a "$FAIL_STATE" "$TMP/archive-failure-before"
+CALLS_BEFORE_ARCHIVE_FAILURE=$(wc -l <"$PI_CALLS")
+if PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/archive-failure-state" "$PROMPT_OPT" "$TMP/fresh-request.md" >/dev/null 2>&1; then echo 'archive failure allowed state mutation' >&2; exit 1; fi
+test "$(wc -l <"$PI_CALLS")" -eq "$CALLS_BEFORE_ARCHIVE_FAILURE"
+cmp "$TMP/archive-failure-before/last-input.md" "$FAIL_STATE/last-input.md"
+cmp "$TMP/archive-failure-before/last-settings.txt" "$FAIL_STATE/last-settings.txt"
+# Source-context change during adoption confirmation must prevent modern cache eligibility.
+LEGACY_STATE="$TMP/legacy-state/prompt-opt"
+mkdir -p "$LEGACY_STATE"
+printf 'legacy task\n' >"$LEGACY_STATE/last-input.md"
+printf 'legacy task\n' >"$LEGACY_STATE/last-successful-input.md"
+printf 'legacy optimized\n' >"$LEGACY_STATE/last-output.md"
+LEGACY_HASH=$(sha256sum "$LEGACY_STATE/last-successful-input.md" | cut -d' ' -f1)
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/legacy-state" "$PROMPT_OPT" --history "$LEGACY_HASH" >"$TMP/legacy-show.out"
+grep -q 'legacy optimized' "$TMP/legacy-show.out"
+grep -q 'legacy/unverified' "$TMP/legacy-show.out"
+# Another legacy pair is archived during a new optimization before last-output is replaced.
+OVERWRITE_STATE="$TMP/legacy-overwrite-state/prompt-opt"
+mkdir -p "$OVERWRITE_STATE"
+printf 'old request\n' >"$OVERWRITE_STATE/last-input.md"
+printf 'old request\n' >"$OVERWRITE_STATE/last-successful-input.md"
+printf 'old output\n' >"$OVERWRITE_STATE/last-output.md"
+OLD_HASH=$(sha256sum "$OVERWRITE_STATE/last-successful-input.md" | cut -d' ' -f1)
+printf 'new request\n' >"$TMP/new-request.md"
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/legacy-overwrite-state" "$PROMPT_OPT" "$TMP/new-request.md" >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/legacy-overwrite-state" "$PROMPT_OPT" --history "$OLD_HASH" >"$TMP/old-after-overwrite.out"
+grep -q 'old output' "$TMP/old-after-overwrite.out"
+# Adoption cancellation leaves the legacy files untouched; confirmation creates an immutable reusable record.
+cp "$LEGACY_STATE/last-output.md" "$TMP/legacy-output-copy"
+printf 'original settings\n' >"$LEGACY_STATE/last-settings.txt"
+cp "$LEGACY_STATE/last-settings.txt" "$TMP/legacy-settings-copy"
+if printf 'n\n' | PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/legacy-state" "$PROMPT_OPT" --adopt-cache >/dev/null 2>&1; then echo 'adoption cancellation unexpectedly succeeded' >&2; exit 1; fi
+cmp "$LEGACY_STATE/last-output.md" "$TMP/legacy-output-copy"
+cmp "$LEGACY_STATE/last-settings.txt" "$TMP/legacy-settings-copy"
+if printf 'y\n' | PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/legacy-state" "$PROMPT_OPT" --adopt-cache >"$TMP/adoption.out" 2>"$TMP/adoption.err"; then :; else cat "$TMP/adoption.err" >&2; echo 'adoption unexpectedly failed' >&2; exit 1; fi
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/legacy-state" "$PROMPT_OPT" --history "$LEGACY_HASH" >"$TMP/adopted-show.out"
+grep -q 'legacy optimized' "$TMP/adopted-show.out"
+printf 'legacy task\n' >"$TMP/adopt-request.md"
+CALLS_BEFORE_ADOPT_HIT=$(wc -l <"$PI_CALLS")
+PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/legacy-state" "$PROMPT_OPT" "$TMP/adopt-request.md" >/dev/null 2>&1
+test "$(wc -l <"$PI_CALLS")" -eq "$CALLS_BEFORE_ADOPT_HIT"
+UNVERIFIED="$TMP/unverified-adopt-state/prompt-opt"
+mkdir -p "$UNVERIFIED"
+printf 'unverified task\n' >"$UNVERIFIED/last-input.md"
+printf 'unverified output\n' >"$UNVERIFIED/last-output.md"
+printf 'unverified task\n' >"$UNVERIFIED/last-successful-input.md"
+UNVERIFIED_HASH=$(sha256sum "$UNVERIFIED/last-input.md" | cut -d' ' -f1)
+printf 'y\n' | PATH="$TMP/mock-bin:$PATH" PI_VERSION=invalid PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/unverified-adopt-state" "$PROMPT_OPT" --adopt-cache >/dev/null 2>&1
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/unverified-adopt-state" "$PROMPT_OPT" --history "$UNVERIFIED_HASH" >"$TMP/unverified-adopt.out"
+grep -q 'unverified' "$TMP/unverified-adopt.out"
+# Source-context change during adoption confirmation must prevent modern cache eligibility.
+RACE_BIN="$TMP/race-bin"
+mkdir -p "$RACE_BIN" "$TMP/race-state/prompt-opt"
+cat >"$RACE_BIN/pi" <<'RACE_PI'
+#!/bin/sh
+if [ "${1:-}" = --version ]; then
+  count=0; [ ! -f "$PI_VERSION_COUNT" ] || count=$(cat "$PI_VERSION_COUNT")
+  count=$((count + 1)); printf '%s\n' "$count" >"$PI_VERSION_COUNT"
+  if [ "$count" -eq 1 ]; then echo 1.1.0; else echo 1.2.0; fi
+  exit 0
+fi
+echo 'unexpected optimizer call' >>"$PI_CALLS"
+echo 'optimized race'
+RACE_PI
+chmod +x "$RACE_BIN/pi"
+printf 'race request' >"$TMP/race-state/prompt-opt/last-input.md"
+printf 'race request' >"$TMP/race-state/prompt-opt/last-successful-input.md"
+printf 'race output' >"$TMP/race-state/prompt-opt/last-output.md"
+printf 'y\n' | PATH="$RACE_BIN:$TMP/mock-bin:$PATH" PI_VERSION_COUNT="$TMP/pi-version-count" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/race-state" "$PROMPT_OPT" --adopt-cache >/dev/null 2>&1
+RACE_HASH=$(sha256sum "$TMP/race-state/prompt-opt/last-input.md" | cut -d' ' -f1)
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/race-state" "$PROMPT_OPT" --history "$RACE_HASH" >"$TMP/race-show.out"
+grep -q 'unverified' "$TMP/race-show.out"
+# A clipboard failure must not discard a successful optimization record.
+printf 'clipboard recovery task\n' >"$TMP/recovery.md"
+if PATH="$TMP/mock-bin:$PATH" FAIL_CLIPBOARD=1 PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/recovery-state" "$PROMPT_OPT" "$TMP/recovery.md" >"$TMP/recovery.out" 2>/dev/null; then
+  echo 'clipboard failure unexpectedly succeeded' >&2; exit 1
+fi
+PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/recovery-state" "$PROMPT_OPT" --history "$(sha256sum "$TMP/recovery.md" | cut -d' ' -f1)" >"$TMP/recovery-history.out"
+grep -q 'optimized-' "$TMP/recovery-history.out"
+printf '%s\n' 'sample task' | PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state-run" \
+  "$PROMPT_OPT" --debug - >"$TMP/prompt-run.out" 2>"$TMP/prompt-run.log"
+grep -q 'phase=pi_start' "$TMP/prompt-run.log"
+grep -q 'phase=pi_complete status=0' "$TMP/prompt-run.log"
+grep -q 'phase=clipboard_complete' "$TMP/prompt-run.log"
+grep -q 'phase=complete' "$TMP/prompt-run.log"
+node "$ROOT/tests/prompt-opt-extension.mjs"
+printf 'prompt-opt tests passed\n'

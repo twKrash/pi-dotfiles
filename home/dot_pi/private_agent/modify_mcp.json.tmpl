@@ -1,0 +1,3 @@
+#!/bin/sh
+# Merge repo MCP servers into the live file, stdin -> stdout. Other servers and local entries are kept.
+exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | quote }} mcp {{ joinPath .chezmoi.workingTree "agent/mcp.json" | quote }}
