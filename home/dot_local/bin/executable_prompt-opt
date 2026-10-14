@@ -54,6 +54,10 @@ Use --opt-provider / --opt-model for your actual Pi provider and model IDs.
 Environment defaults (optional): PROMPT_OPT_TARGET_PROVIDER,
   PROMPT_OPT_TARGET_MODEL, PROMPT_OPT_TARGET_EFFORT, PROMPT_OPT_TARGET_ENVIRONMENT,
   PROMPT_OPT_RUNNER_PROVIDER, PROMPT_OPT_RUNNER_MODEL, PROMPT_OPT_RUNNER_EFFORT.
+  PROMPT_OPT_ANTHROPIC_PROVIDER: Pi provider that serves Anthropic models
+    (for example claude-bridge); replaces a resolved "anthropic" optimizer provider.
+  PROMPT_OPT_RUNNER_EXTENSION: one Pi extension file to load for the optimizer run
+    (other extensions stay disabled), for example the provider's own extension.
 Legacy PROMPT_OPT_PI_* variables remain supported.
 Saved state: ~/.local/state/prompt-opt/ (or $XDG_STATE_HOME/prompt-opt/).
 HELP
@@ -247,6 +251,8 @@ if [[ -z "$opt_model" ]]; then
   fi
 fi
 opt_effort="${arg_opt_effort:-${previous[6]:-${PROMPT_OPT_RUNNER_EFFORT:-${PROMPT_OPT_PI_EFFORT:-high}}}}"
+# Some setups serve Anthropic models through another Pi provider (for example claude-bridge).
+if [[ "$opt_provider" == anthropic && -n "${PROMPT_OPT_ANTHROPIC_PROVIDER:-}" ]]; then opt_provider="$PROMPT_OPT_ANTHROPIC_PROVIDER"; fi
 for id in "$opt_provider" "$opt_model" "$opt_effort"; do
   [[ "$id" =~ ^[A-Za-z0-9._/-]+$ ]] || die 'invalid optimizer provider, model, or effort'
 done
@@ -391,13 +397,15 @@ printf 'Optimizing for %s/%s (%s) with Pi %s/%s (%s)...\n' \
   "$provider" "$model" "$effort" "$opt_provider" "$opt_model" "$opt_effort" >&2
 debug_log "phase=pi_start executable=$pi_executable provider=$opt_provider model=$opt_model effort=$opt_effort"
 pi_started=$SECONDS
+[[ -z "${PROMPT_OPT_RUNNER_EXTENSION:-}" || -f "$PROMPT_OPT_RUNNER_EXTENSION" ]] ||
+  die "runner extension does not exist: $PROMPT_OPT_RUNNER_EXTENSION"
 # Pi appends a missing --append-system-prompt path as literal text, so require the file.
 [[ -f "$LAB_DIR/AGENTS.md" ]] || die "lab instructions do not exist: $LAB_DIR/AGENTS.md"
 if (cd "$LAB_DIR" && pi \
   --provider "$opt_provider" \
   --model "$opt_model" \
   --thinking "$opt_effort" \
-  --print --no-session --no-extensions --no-skills --no-mcp \
+  --print --no-session --no-extensions ${PROMPT_OPT_RUNNER_EXTENSION:+--extension "$PROMPT_OPT_RUNNER_EXTENSION"} --no-skills --no-mcp \
   --no-context-files --append-system-prompt "$LAB_DIR/AGENTS.md" \
   --tools read,grep,find,ls \
   "$optimizer_input") >"$answer" 2>"$errors"; then
