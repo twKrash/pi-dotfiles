@@ -6,8 +6,7 @@ Portable user-level configuration, utilities, and skills for [Pi](https://pi.dev
 
 ```sh
 brew install chezmoi                                   # or see chezmoi.io/install
-git clone git@github.com:twKrash/pi-dotfiles.git ~/Work/code/pi-dotfiles
-chezmoi init --source ~/Work/code/pi-dotfiles          # asks: harnesses on this machine, Pi subagent profile
+chezmoi init git@github.com:twKrash/pi-dotfiles.git    # asks: harnesses on this machine, Pi subagent profile
 chezmoi diff                                           # review
 chezmoi apply                                          # asks before replacing any existing file
 ```
