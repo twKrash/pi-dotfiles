@@ -7,11 +7,22 @@ Portable user-level configuration, utilities, and skills for [Pi](https://pi.dev
 ```sh
 git clone https://github.com/twKrash/pi-dotfiles.git
 cd pi-dotfiles
-./scripts/setup.sh --dry-run
-./scripts/setup.sh
-./scripts/setup.sh --provider=claude
-./scripts/setup.sh --provider=codex
+./scripts/setup.sh --dry-run pi claude   # preview; pick the harnesses used on this machine
+./scripts/setup.sh pi claude             # first run: harnesses are required, then remembered
+./scripts/setup.sh --provider=claude     # optional: Pi subagent model profile (codex|claude)
 ```
+
+### Harnesses
+
+Setup takes one or more harnesses (`pi`, `claude`, `codex`); the first run requires them and stores the list in `~/.config/pi-dotfiles/harnesses` (`PI_DOTFILES_CONFIG_DIR` overrides the directory), so later runs need no arguments. Each harness gets its own generated global instructions file:
+
+| Harness | Generated file | Contents |
+|---|---|---|
+| `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local |
+| `claude` | `~/.claude/CLAUDE.md` (`CLAUDE_CONFIG_DIR`) | core + `instructions/harness-claude.md` + local |
+| `codex` | `~/.codex/AGENTS.md` (`CODEX_HOME`) | core + local |
+
+Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/pi-dotfiles/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context.
 
 The Pi agent target defaults to `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use another Pi agent directory. Setup also installs `prompt-opt` under `~/.local/bin`, and prompt-engineering lab files under `~/ai/prompt_engineering` (the CLI default; set `PROMPT_LAB_DIR` to override at runtime). `setup.sh` uses POSIX `/bin/sh` and Node.js (already required by Pi). Keep `~/.local/bin` on `PATH`.
 
@@ -38,14 +49,11 @@ To update configs after fetching repository changes:
 git pull --ff-only
 ./scripts/setup.sh --dry-run
 ./scripts/setup.sh
-./scripts/setup.sh --provider=claude
-./scripts/setup.sh --provider=codex
 ```
 
 ## Included config
 
-- `agent/AGENTS.md`: harness-neutral user-level instructions (usable as a global `AGENTS.md`/`CLAUDE.md` by any agent).
-- `agent/AGENTS.pi.md`: Pi-only addendum (memory and scratch locations, `pi-subagents` delegation, Herdr worktrees, `codemode` orchestration). Setup installs `~/.pi/agent/AGENTS.md` as `agent/AGENTS.md` plus this addendum: Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`.
+- `instructions/`: core and per-harness instruction sources (see Harnesses).
 - `agent/MEMORY.md.template`: headings only; no personal memory content.
 - `agent/settings.json`: package list and portable `pi-subagents` role defaults. Provider model IDs live in opt-in `agent/providers/` profiles.
 - `agent/mcp.json`: Context7 endpoint only; personal MCP headers are excluded.
