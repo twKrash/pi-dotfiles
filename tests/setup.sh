@@ -529,6 +529,16 @@ printf '%s\n' 'new local rule' >"$TMP/rel-home/.config/pi-dotfiles/local.md"
 (cd "$TMP/cwd-b" && HOME="$TMP/rel-home" CODEX_HOME=rel-codex "$ROOT/scripts/setup.sh" >"$TMP/rel-b.log")
 grep -q "CONFLICT preserved rel-codex/AGENTS.md" "$TMP/rel-b.log"
 if grep -q 'new local rule' "$TMP/cwd-b/rel-codex/AGENTS.md"; then exit 1; fi
+# The merge tool's scratch copy lives in a private (0700) per-run directory that is removed afterwards.
+set_first_line "$REPO2_LAB" 'repo head 5'
+printf '#!/bin/sh\nls -ld "$(dirname "$1")" >"$PERM_LOG"\ndirname "$1" >"$DIR_LOG"\nprintf "%%s\\n" "resolved by tool" >"$1"\n' >"$TMP/perm-tool"
+chmod +x "$TMP/perm-tool"
+chmod 644 "$M_LAB"
+printf 'm\n' | PERM_LOG="$TMP/perm.log" DIR_LOG="$TMP/dir.log" PI_DOTFILES_MERGE_TOOL="$TMP/perm-tool" \
+  msetup --interactive >"$TMP/merge-perm.log" 2>/dev/null
+grep -q "MERGED $M_LAB" "$TMP/merge-perm.log"
+grep -q '^drwx------' "$TMP/perm.log"
+test ! -e "$(cat "$TMP/dir.log")"
 # Preserve a conflicting lab file unless --force is requested.
 rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 LAB="$HOME/ai/prompt_engineering/prompt_engineering.md"
