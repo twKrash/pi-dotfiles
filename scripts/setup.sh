@@ -51,8 +51,18 @@ run_merge() {
   fi
 }
 
+# Last repo version installed per target; enables 3-way merges of local edits with repo updates.
+BASE_DIR="$CONFIG_DIR/base"
+MERGE_TOOL=${PI_DOTFILES_MERGE_TOOL:-$(command -v nvim >/dev/null 2>&1 && echo 'nvim -d' || echo vimdiff)}
+record_base() {
+  [ "$DRY_RUN" -eq 0 ] || return 0
+  mkdir -p "$(dirname "$BASE_DIR$2")"
+  cp "$1" "$BASE_DIR$2"
+}
+
 copy_one() {
   src=$1 target=$2 create_only=${3:-no}
+  install_src=$src
   if [ -L "$target" ]; then
     printf 'CONFLICT symlink preserved %s\n' "$target"
     return
@@ -63,17 +73,44 @@ copy_one() {
   fi
   if [ -f "$target" ] && cmp -s "$src" "$target"; then
     printf 'UNCHANGED %s\n' "$target"
+    record_base "$src" "$target"
     return
   fi
-  if [ -e "$target" ] && [ "$FORCE" -ne 1 ]; then
+  if [ -f "$target" ] && [ -f "$BASE_DIR$target" ] && [ "$FORCE" -ne 1 ] && command -v git >/dev/null 2>&1; then
+    if cmp -s "$src" "$BASE_DIR$target"; then
+      printf 'LOCAL kept %s (repo unchanged since last install)\n' "$target"
+      return
+    fi
+    merged=$(mktemp)
+    if git merge-file -p "$target" "$BASE_DIR$target" "$src" >"$merged" 2>/dev/null; then
+      install_src=$merged
+    else
+      rm -f "$merged"
+    fi
+  fi
+  if [ -e "$target" ] && [ "$FORCE" -ne 1 ] && [ "$install_src" = "$src" ]; then
     candidate="$target.pi-dotfiles-new"
     if [ "$INTERACTIVE" -eq 1 ]; then
-      printf 'Conflict: %s\n  [u] update from repo (backup local)\n  [k] keep local and stage repo candidate\n  [s] skip\nChoice [s]: ' "$target" >&2
-      IFS= read -r choice <&3 || { printf '\nNo choice received; preserving %s\n' "$target" >&2; return; }
+      while :; do
+        printf 'Conflict: %s\n  [d] show diff (local -> repo)\n  [m] merge in %s (edit the local file, left)\n  [u] update from repo (backup local)\n  [k] keep local and stage repo candidate\n  [s] skip\nChoice [s]: ' "$target" "$MERGE_TOOL" >&2
+        IFS= read -r choice <&3 || { printf '\nNo choice received; preserving %s\n' "$target" >&2; return; }
+        case "$choice" in
+          d|D) git diff --no-index -- "$target" "$src" <&3 || : ;;
+          m|M)
+            if [ "$DRY_RUN" -eq 1 ]; then printf 'Merge is unavailable with --dry-run\n' >&2; continue; fi
+            $MERGE_TOOL "$target" "$src" <&3 || { printf 'Merge tool failed; choose again\n' >&2; continue; }
+            printf 'MERGED %s\n' "$target"
+            record_base "$src" "$target"
+            return
+            ;;
+          *) break ;;
+        esac
+      done
       case "$choice" in
         u|U) ;;
         k|K)
           printf 'KEEP %s; candidate: %s\n' "$target" "$candidate"
+          record_base "$src" "$target"
           if [ "$DRY_RUN" -eq 0 ]; then
             if [ -e "$candidate" ] || [ -L "$candidate" ]; then
               printf 'CANDIDATE preserved %s\n' "$candidate"
@@ -100,8 +137,13 @@ copy_one() {
       return
     fi
   fi
-  printf '%s %s\n' "$([ "$DRY_RUN" -eq 1 ] && printf 'WOULD COPY' || printf 'COPY')" "$target"
-  if [ "$DRY_RUN" -eq 1 ]; then return; fi
+  action=COPY
+  [ "$install_src" = "$src" ] || action=MERGE
+  printf '%s %s\n' "$([ "$DRY_RUN" -eq 1 ] && printf 'WOULD %s' "$action" || printf '%s' "$action")" "$target"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    [ "$install_src" = "$src" ] || rm -f "$install_src"
+    return
+  fi
   mkdir -p "$(dirname "$target")"
   if [ -e "$target" ]; then
     backup="$target.pi-dotfiles-bak.$(date '+%Y%m%d%H%M%S').$$"
@@ -109,8 +151,10 @@ copy_one() {
     printf 'BACKUP %s\n' "$backup"
   fi
   tmp="$target.pi-dotfiles-tmp.$$"
-  cp -p "$src" "$tmp"
+  cp -p "$src" "$tmp" # keeps the repo file's mode; merged content is written over it
+  [ "$install_src" = "$src" ] || { cat "$install_src" >"$tmp"; rm -f "$install_src"; }
   mv -f "$tmp" "$target"
+  record_base "$src" "$target"
 }
 
 copy_tree() {

@@ -458,7 +458,46 @@ done
 PI_CODING_AGENT_DIR="$AGENT" "$ROOT/scripts/setup.sh" >"$TMP/repeat.log"
 grep -q 'UNCHANGED .*\.local/bin/prompt-opt' "$TMP/repeat.log"
 grep -q 'UNCHANGED .*ai/prompt_engineering/AGENTS.md' "$TMP/repeat.log"
+# Local edits merge with repo updates, using the last installed repo version as the base.
+REPO2="$TMP/repo2"
+cp -R "$ROOT" "$REPO2"
+M_LAB="$TMP/merge-home/ai/prompt_engineering/prompt_engineering.md"
+REPO2_LAB="$REPO2/prompt_engineering/prompt_engineering.md"
+msetup() { HOME="$TMP/merge-home" PI_CODING_AGENT_DIR="$TMP/merge-agent" "$REPO2/scripts/setup.sh" "$@"; }
+set_first_line() { { printf '%s\n' "$2"; tail -n +2 "$1"; } >"$1.tmp"; mv "$1.tmp" "$1"; }
+msetup pi >/dev/null
+printf '%s\n' 'local tail' >>"$M_LAB"
+{ printf '%s\n' 'repo head'; cat "$REPO2_LAB"; } >"$REPO2_LAB.tmp"; mv "$REPO2_LAB.tmp" "$REPO2_LAB"
+msetup --dry-run >"$TMP/merge-dry.log"
+grep -q "WOULD MERGE $M_LAB" "$TMP/merge-dry.log"
+tail -n 1 "$M_LAB" | grep -qx 'local tail'
+head -n 1 "$M_LAB" | grep -vqx 'repo head'
+msetup >"$TMP/merge.log"
+grep -q "MERGE $M_LAB" "$TMP/merge.log"
+head -n 1 "$M_LAB" | grep -qx 'repo head'
+tail -n 1 "$M_LAB" | grep -qx 'local tail'
+msetup >"$TMP/merge-again.log"
+grep -q "LOCAL kept $M_LAB" "$TMP/merge-again.log"
+test ! -e "$M_LAB.pi-dotfiles-new"
+# Overlapping edits still stage a candidate; interactive mode can show the diff or open a merge tool.
+set_first_line "$M_LAB" 'local head'
+set_first_line "$REPO2_LAB" 'repo head 2'
+msetup >"$TMP/merge-conflict.log"
+grep -q "CONFLICT preserved $M_LAB" "$TMP/merge-conflict.log"
+head -n 1 "$M_LAB" | grep -qx 'local head'
+cmp "$REPO2_LAB" "$M_LAB.pi-dotfiles-new"
+printf 'd\ns\n' | msetup --interactive >"$TMP/merge-diff.log" 2>/dev/null
+grep -qx '+repo head 2' "$TMP/merge-diff.log"
+grep -q "SKIP $M_LAB" "$TMP/merge-diff.log"
+printf '#!/bin/sh\nprintf "%%s\\n" "resolved by tool" >"$1"\n' >"$TMP/merge-tool"
+chmod +x "$TMP/merge-tool"
+printf 'm\n' | PI_DOTFILES_MERGE_TOOL="$TMP/merge-tool" msetup --interactive >"$TMP/merge-tool.log" 2>/dev/null
+grep -q "MERGED $M_LAB" "$TMP/merge-tool.log"
+grep -qx 'resolved by tool' "$M_LAB"
+msetup >"$TMP/merge-resolved.log"
+grep -q "LOCAL kept $M_LAB" "$TMP/merge-resolved.log"
 # Preserve a conflicting lab file unless --force is requested.
+rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 LAB="$HOME/ai/prompt_engineering/prompt_engineering.md"
 printf '%s\n' 'user lab file' > "$LAB"
 PI_CODING_AGENT_DIR="$AGENT" "$ROOT/scripts/setup.sh" >"$TMP/lab-conflict.log"
@@ -476,6 +515,7 @@ if (!mcp.mcpServers.context7?.url) throw new Error('missing Context7');
 NODE
 
 # Preserve/stage a conflicting executable unless --force is requested.
+rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 BIN="$HOME/.local/bin/prompt-opt"
 printf '%s\n' 'user binary' > "$BIN"
 PI_CODING_AGENT_DIR="$AGENT" "$ROOT/scripts/setup.sh" >"$TMP/binary-conflict.log"
@@ -488,6 +528,7 @@ cmp "$ROOT/bin/prompt-opt" "$BIN"
 test -x "$BIN"
 
 # Interactive conflict choices cover both prompt-opt deployment targets.
+rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 printf '%s\n' 'local prompt-opt' >"$BIN"
 EXT="$AGENT/extensions/prompt-opt-pi.js"
 printf '%s\n' 'local Pi extension' >"$EXT"
@@ -498,6 +539,7 @@ cmp "$ROOT/agent/extensions/prompt-opt-pi.js" "$EXT"
 grep -q 'local Pi extension' "$EXT".pi-dotfiles-bak.*
 
 # Preserve unrelated user values, merge package additions, and keep local conflicts.
+rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 node - "$AGENT/settings.json" "$AGENT/mcp.json" <<'NODE'
 const fs = require('fs');
 const p = process.argv[2]; const s = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -578,8 +620,9 @@ if grep -q 'pi-subagents\|codemode' "$H_HOME/.claude/CLAUDE.md" "$H_HOME/.codex/
 test ! -e "$TMP/harness-agent/settings.json"
 test ! -e "$H_HOME/.local/bin/prompt-opt"
 printf '%s\n' 'updated local rule' >>"$H_CONFIG/local.md"
-HOME="$H_HOME" PI_CODING_AGENT_DIR="$TMP/harness-agent" "$ROOT/scripts/setup.sh" --force >"$TMP/harness-again.log"
+HOME="$H_HOME" PI_CODING_AGENT_DIR="$TMP/harness-agent" "$ROOT/scripts/setup.sh" >"$TMP/harness-again.log"
 grep -q 'HARNESSES claude codex' "$TMP/harness-again.log"
+grep -q "MERGE $H_HOME/.claude/CLAUDE.md" "$TMP/harness-again.log"
 grep -q 'updated local rule' "$H_HOME/.claude/CLAUDE.md"
 grep -q 'updated local rule' "$H_HOME/.codex/AGENTS.md"
 printf 'setup tests passed\n'

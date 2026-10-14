@@ -31,7 +31,8 @@ The Pi agent target defaults to `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use 
 - `prompt_engineering/`: canonical prompt-engineering instruction, playbook, and references installed into `~/ai/prompt_engineering`. Setup generates the Pi skill `SKILL.md` from `AGENTS.md` plus Pi metadata and copies reference files from this same source; existing files are preserved and staged as `.pi-dotfiles-new` on conflict.
 - `settings.json`: merges package sources and portable subagent role defaults; keeps other settings and existing package entries. `--provider=codex|claude` selects model/thinking defaults for subagents; explicit selection replaces only those fields, preserving local tool allowlists and other role settings. Claude profile adds `npm:pi-claude-agent-sdk` (setup does not install packages).
 - `mcp.json`: adds Context7 only; preserves other MCP servers. A conflicting local Context7 entry is kept unless `--force` is used.
-- Managed files: new files are copied; differing files are preserved and staged beside the target as `.pi-dotfiles-new`.
+- Managed files: new files are copied; differing files are preserved and staged beside the target as `.pi-dotfiles-new`. Setup remembers the repo version it last installed (`~/.config/pi-dotfiles/base/`): local edits are kept silently while the repo file is unchanged, and are 3-way merged (`git merge-file`) with repo updates when they do not overlap. Only overlapping edits are reported as conflicts.
+- `--interactive`: for each conflict, `[d]` shows the diff (local → repo), `[m]` opens a merge tool on the local and repo files (`PI_DOTFILES_MERGE_TOOL`, default `nvim -d` or `vimdiff`; edit the local file), plus `[u]` update, `[k]` keep and stage, `[s]` skip.
 - `MEMORY.md`: created from the empty template only when absent. Existing memory is never overwritten.
 - `--force`: backs up and replaces conflicting managed files. It still preserves unrelated settings and MCP servers.
 
