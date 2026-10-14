@@ -496,6 +496,39 @@ grep -q "MERGED $M_LAB" "$TMP/merge-tool.log"
 grep -qx 'resolved by tool' "$M_LAB"
 msetup >"$TMP/merge-resolved.log"
 grep -q "LOCAL kept $M_LAB" "$TMP/merge-resolved.log"
+# A merge tool that partially writes and then fails must leave the local file untouched.
+set_first_line "$REPO2_LAB" 'repo head 3'
+cp "$M_LAB" "$TMP/before-failed-merge"
+printf '#!/bin/sh\nprintf "%%s\\n" partial >"$1"\nexit 1\n' >"$TMP/failing-tool"
+chmod +x "$TMP/failing-tool"
+printf 'm\ns\n' | PI_DOTFILES_MERGE_TOOL="$TMP/failing-tool" msetup --interactive >"$TMP/merge-failed.log" 2>/dev/null
+cmp "$TMP/before-failed-merge" "$M_LAB"
+if grep -q "MERGED $M_LAB" "$TMP/merge-failed.log"; then exit 1; fi
+# Merge-tool paths with spaces work when quoted inside the value, like GIT_EDITOR.
+mkdir -p "$TMP/tool dir"
+cp "$TMP/merge-tool" "$TMP/tool dir/merge tool"
+printf 'm\n' | PI_DOTFILES_MERGE_TOOL="\"$TMP/tool dir/merge tool\"" msetup --interactive >"$TMP/merge-space.log" 2>/dev/null
+grep -q "MERGED $M_LAB" "$TMP/merge-space.log"
+grep -qx 'resolved by tool' "$M_LAB"
+ls "$M_LAB".pi-dotfiles-bak.* >/dev/null
+# [k] records its decision only after staging succeeds; a failed staging is retried.
+set_first_line "$REPO2_LAB" 'repo head 4'
+rm -f "$M_LAB.pi-dotfiles-new"
+chmod 555 "$(dirname "$M_LAB")"
+if printf 'k\n' | msetup --interactive >/dev/null 2>&1; then chmod 755 "$(dirname "$M_LAB")"; exit 1; fi
+chmod 755 "$(dirname "$M_LAB")"
+msetup >"$TMP/stage-retry.log"
+grep -q "CONFLICT preserved $M_LAB" "$TMP/stage-retry.log"
+cmp "$REPO2_LAB" "$M_LAB.pi-dotfiles-new"
+# Relative targets from different working directories never share a baseline.
+mkdir -p "$TMP/cwd-a" "$TMP/cwd-b/rel-codex"
+(cd "$TMP/cwd-a" && HOME="$TMP/rel-home" CODEX_HOME=rel-codex "$ROOT/scripts/setup.sh" codex >/dev/null)
+cp "$TMP/cwd-a/rel-codex/AGENTS.md" "$TMP/cwd-b/rel-codex/AGENTS.md"
+mkdir -p "$TMP/rel-home/.config/pi-dotfiles"
+printf '%s\n' 'new local rule' >"$TMP/rel-home/.config/pi-dotfiles/local.md"
+(cd "$TMP/cwd-b" && HOME="$TMP/rel-home" CODEX_HOME=rel-codex "$ROOT/scripts/setup.sh" >"$TMP/rel-b.log")
+grep -q "CONFLICT preserved rel-codex/AGENTS.md" "$TMP/rel-b.log"
+if grep -q 'new local rule' "$TMP/cwd-b/rel-codex/AGENTS.md"; then exit 1; fi
 # Preserve a conflicting lab file unless --force is requested.
 rm -rf "$HOME/.config/pi-dotfiles/base" # installs from before 3-way merge support have no base
 LAB="$HOME/ai/prompt_engineering/prompt_engineering.md"

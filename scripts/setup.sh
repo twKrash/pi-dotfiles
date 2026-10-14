@@ -53,11 +53,15 @@ run_merge() {
 
 # Last repo version installed per target; enables 3-way merges of local edits with repo updates.
 BASE_DIR="$CONFIG_DIR/base"
+# Shell command string, like GIT_EDITOR: quote paths with spaces inside the value.
 MERGE_TOOL=${PI_DOTFILES_MERGE_TOOL:-$(command -v nvim >/dev/null 2>&1 && echo 'nvim -d' || echo vimdiff)}
+# Key baselines by absolute target path so relative targets from different directories never share one.
+base_of() { case "$1" in /*) printf '%s%s' "$BASE_DIR" "$1" ;; *) printf '%s%s/%s' "$BASE_DIR" "$(pwd -P)" "$1" ;; esac; }
 record_base() {
   [ "$DRY_RUN" -eq 0 ] || return 0
-  mkdir -p "$(dirname "$BASE_DIR$2")"
-  cp "$1" "$BASE_DIR$2"
+  base=$(base_of "$2")
+  mkdir -p "$(dirname "$base")"
+  cp "$1" "$base"
 }
 
 copy_one() {
@@ -76,13 +80,14 @@ copy_one() {
     record_base "$src" "$target"
     return
   fi
-  if [ -f "$target" ] && [ -f "$BASE_DIR$target" ] && [ "$FORCE" -ne 1 ] && command -v git >/dev/null 2>&1; then
-    if cmp -s "$src" "$BASE_DIR$target"; then
+  base=$(base_of "$target")
+  if [ -f "$target" ] && [ -f "$base" ] && [ "$FORCE" -ne 1 ] && command -v git >/dev/null 2>&1; then
+    if cmp -s "$src" "$base"; then
       printf 'LOCAL kept %s (repo unchanged since last install)\n' "$target"
       return
     fi
     merged=$(mktemp)
-    if git merge-file -p "$target" "$BASE_DIR$target" "$src" >"$merged" 2>/dev/null; then
+    if git merge-file -p "$target" "$base" "$src" >"$merged" 2>/dev/null; then
       install_src=$merged
     else
       rm -f "$merged"
@@ -98,7 +103,18 @@ copy_one() {
           d|D) git diff --no-index -- "$target" "$src" <&3 || : ;;
           m|M)
             if [ "$DRY_RUN" -eq 1 ]; then printf 'Merge is unavailable with --dry-run\n' >&2; continue; fi
-            $MERGE_TOOL "$target" "$src" <&3 || { printf 'Merge tool failed; choose again\n' >&2; continue; }
+            work=$(mktemp)
+            cp -p "$target" "$work"
+            if ! sh -c "$MERGE_TOOL \"\$1\" \"\$2\"" merge-tool "$work" "$src" <&3; then
+              rm -f "$work"
+              printf 'Merge tool failed; %s unchanged, choose again\n' "$target" >&2
+              continue
+            fi
+            backup="$target.pi-dotfiles-bak.$(date '+%Y%m%d%H%M%S').$$"
+            cp -p "$target" "$backup"
+            printf 'BACKUP %s\n' "$backup"
+            cat "$work" >"$target"
+            rm -f "$work"
             printf 'MERGED %s\n' "$target"
             record_base "$src" "$target"
             return
@@ -110,7 +126,6 @@ copy_one() {
         u|U) ;;
         k|K)
           printf 'KEEP %s; candidate: %s\n' "$target" "$candidate"
-          record_base "$src" "$target"
           if [ "$DRY_RUN" -eq 0 ]; then
             if [ -e "$candidate" ] || [ -L "$candidate" ]; then
               printf 'CANDIDATE preserved %s\n' "$candidate"
@@ -118,6 +133,7 @@ copy_one() {
               cp "$src" "$candidate"
             fi
           fi
+          record_base "$src" "$target"
           return
           ;;
         *)
