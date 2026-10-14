@@ -64,6 +64,7 @@ cat >"$TMP/mock-bin/pi" <<'MOCK_PI'
 #!/bin/sh
 if [ "${1:-}" = --version ]; then echo "${PI_VERSION:-1.1.0}"; exit 0; fi
 echo "pi-called" >>"$PI_CALLS"
+if [ -n "${PI_ARGS:-}" ]; then printf '%s\n' "$@" >"$PI_ARGS"; fi
 if [ -n "${MUTATE_LAB:-}" ]; then printf '%s\n' changed >>"$MUTATE_LAB/.runtime-change"; fi
 call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
 printf 'optimized-%s\n' "$call_count"
@@ -121,6 +122,13 @@ TMPDIR="$TMP/link-tmpdir" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/symlink-tmpd
   PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/symlink-tmpdir-state" \
   "$ROOT/bin/prompt-opt" "$TMP/symlink-tmpdir-request.md" >"$TMP/symlink-tmpdir.out"
 grep -qx 'optimized-1' "$TMP/symlink-tmpdir.out"
+# The optimizer run must see only the lab instructions, not global/ancestor AGENTS.md.
+printf 'context isolation task\n' >"$TMP/isolation-request.md"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/isolation-calls" PI_ARGS="$TMP/isolation-args" \
+  PROMPT_LAB_DIR="$ROOT/prompt_engineering" XDG_STATE_HOME="$TMP/isolation-state" \
+  "$ROOT/bin/prompt-opt" "$TMP/isolation-request.md" >/dev/null
+grep -qx -- '--no-context-files' "$TMP/isolation-args"
+grep -A1 -x -- '--append-system-prompt' "$TMP/isolation-args" | tail -n 1 | grep -qx "$ROOT/prompt_engineering/AGENTS.md"
 # Exact-byte history is immutable and repeated requests should be served without Pi.
 PI_CALLS="$TMP/pi-calls"
 export PI_CALLS
@@ -224,6 +232,7 @@ PATH="$TMP/mock-bin:$PATH" XDG_STATE_HOME="$TMP/history-state" "$ROOT/bin/prompt
 test "$(grep -c '^===' "$TMP/history-variants.out")" -eq 6
 # Source and Pi-version changes must miss the cache; unusable versions never cache.
 mkdir -p "$TMP/lab"
+printf 'lab instructions\n' >"$TMP/lab/AGENTS.md"
 printf 'lab source\n' >"$TMP/lab/guide.md"
 PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$TMP/lab" XDG_STATE_HOME="$TMP/invalidation-state" "$ROOT/bin/prompt-opt" "$TMP/request.md" >/dev/null 2>&1
 printf 'changed source\n' >>"$TMP/lab/guide.md"

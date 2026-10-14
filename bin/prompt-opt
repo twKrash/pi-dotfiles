@@ -391,11 +391,14 @@ printf 'Optimizing for %s/%s (%s) with Pi %s/%s (%s)...\n' \
   "$provider" "$model" "$effort" "$opt_provider" "$opt_model" "$opt_effort" >&2
 debug_log "phase=pi_start executable=$pi_executable provider=$opt_provider model=$opt_model effort=$opt_effort"
 pi_started=$SECONDS
+# Pi appends a missing --append-system-prompt path as literal text, so require the file.
+[[ -f "$LAB_DIR/AGENTS.md" ]] || die "lab instructions do not exist: $LAB_DIR/AGENTS.md"
 if (cd "$LAB_DIR" && pi \
   --provider "$opt_provider" \
   --model "$opt_model" \
   --thinking "$opt_effort" \
   --print --no-session --no-extensions --no-skills --no-mcp \
+  --no-context-files --append-system-prompt "$LAB_DIR/AGENTS.md" \
   --tools read,grep,find,ls \
   "$optimizer_input") >"$answer" 2>"$errors"; then
   debug_log "phase=pi_complete status=0 pi_elapsed_s=$((SECONDS - pi_started)) output_bytes=$(wc -c < "$answer" | tr -d '[:space:]')"
