@@ -44,7 +44,8 @@ git pull --ff-only
 
 ## Included config
 
-- `agent/AGENTS.md`: general user-level Pi instructions.
+- `agent/AGENTS.md`: harness-neutral user-level instructions (usable as a global `AGENTS.md`/`CLAUDE.md` by any agent).
+- `agent/APPEND_SYSTEM.md`: Pi-only addendum (memory and scratch locations, `pi-subagents` delegation, Herdr worktrees, `codemode` orchestration); Pi appends it to the system prompt.
 - `agent/MEMORY.md.template`: headings only; no personal memory content.
 - `agent/settings.json`: package list and portable `pi-subagents` role defaults. Provider model IDs live in opt-in `agent/providers/` profiles.
 - `agent/mcp.json`: Context7 endpoint only; personal MCP headers are excluded.

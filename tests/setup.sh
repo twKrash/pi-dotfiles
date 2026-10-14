@@ -21,6 +21,8 @@ cmp "$ROOT/bin/prompt-opt" "$HOME/.local/bin/prompt-opt"
 test -f "$HOME/.local/bin/prompt-opt-history.mjs"
 cmp "$ROOT/bin/prompt-opt-history.mjs" "$HOME/.local/bin/prompt-opt-history.mjs"
 test -f "$AGENT/extensions/prompt-opt-pi.js"
+cmp "$ROOT/agent/AGENTS.md" "$AGENT/AGENTS.md"
+cmp "$ROOT/agent/APPEND_SYSTEM.md" "$AGENT/APPEND_SYSTEM.md"
 test ! -e "$ROOT/agent/skills/prompt-engineering/SKILL.md"
 for file in prompt_engineering.md prompting-references.md prompt-optimization-playbook.md; do
   test ! -e "$ROOT/agent/skills/prompt-engineering/references/$file"

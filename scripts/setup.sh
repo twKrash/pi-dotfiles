@@ -114,6 +114,7 @@ copy_one "$ROOT/bin/prompt-opt" "$HOME/.local/bin/prompt-opt"
 copy_one "$ROOT/bin/prompt-opt-history.mjs" "$HOME/.local/bin/prompt-opt-history.mjs"
 copy_tree "$ROOT/prompt_engineering" "$HOME/ai/prompt_engineering"
 copy_one "$ROOT/agent/AGENTS.md" "$AGENT_DIR/AGENTS.md"
+copy_one "$ROOT/agent/APPEND_SYSTEM.md" "$AGENT_DIR/APPEND_SYSTEM.md"
 copy_one "$ROOT/agent/MEMORY.md.template" "$AGENT_DIR/MEMORY.md" yes
 copy_tree "$ROOT/agent/extensions" "$AGENT_DIR/extensions"
 copy_tree "$ROOT/agent/skills" "$AGENT_DIR/skills"
