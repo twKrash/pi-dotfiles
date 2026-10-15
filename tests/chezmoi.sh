@@ -7,6 +7,32 @@ command -v chezmoi >/dev/null || { echo 'chezmoi is required (brew install chezm
 TMP=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
+# A semantic no-op merge preserves Pi's compact inline array formatting.
+cat >"$TMP/settings-defaults.json" <<'JSON'
+{
+  "packages": ["npm:example"],
+  "subagents": {
+    "agentOverrides": {
+      "scout": {"skills": ["graphify"]}
+    }
+  }
+}
+JSON
+cat >"$TMP/pi-settings.json" <<'JSON'
+{
+  "packages": ["npm:example"],
+  "subagents": {
+    "agentOverrides": {
+      "scout": {"skills": ["graphify"]}
+    }
+  },
+  "defaultTools": ["grep", "find", "ls", "codemode"]
+}
+JSON
+node "$ROOT/scripts/merge-json.mjs" settings "$TMP/settings-defaults.json" \
+  <"$TMP/pi-settings.json" >"$TMP/merged-settings.json"
+cmp "$TMP/pi-settings.json" "$TMP/merged-settings.json"
+
 # cz NAME ARGS...: chezmoi with a per-machine HOME, config, state, and destination under $TMP/NAME
 # (source: $SRC, default this checkout).
 cz() {
@@ -45,7 +71,7 @@ ln -s "$TMP/hybrid/linked.md" "$H/.pi/agent/AGENTS.md"
 node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" <<'NODE'
 const fs = require('fs');
 fs.writeFileSync(process.argv[2], JSON.stringify({
-  packages: ['npm:custom-package'], defaultProvider: 'keep-provider', defaultModel: 'keep-model', userSetting: 'keep',
+  packages: ['npm:custom-package', 'git:github.com/nicobailon/pi-subagents'], defaultProvider: 'keep-provider', defaultModel: 'keep-model', userSetting: 'keep',
   subagents: {agentOverrides: {scout: {model: 'local/old', thinking: 'high', tools: ['read', 'grep']}, worker: {tools: ['read', 'edit', 'write']}}}
 }));
 fs.writeFileSync(process.argv[3], JSON.stringify({mcpServers: {local: {url: 'http://localhost'}}}));
@@ -125,7 +151,9 @@ const m = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const roles = s.subagents.agentOverrides;
 if (s.userSetting !== 'keep') throw new Error('settings overwritten');
 if (!s.packages.includes('npm:custom-package')) throw new Error('custom package removed');
-if (!s.packages.includes('npm:@twkrash/pi-session-inspector@1.5.3')) throw new Error('repo package missing');
+if (!s.packages.includes('npm:@twkrash/pi-session-inspector')) throw new Error('repo package missing');
+if (s.packages.includes('git:github.com/nicobailon/pi-subagents')) throw new Error('legacy pi-subagents Git package retained');
+if (s.packages.filter((pkg) => pkg === 'npm:pi-subagents').length !== 1) throw new Error('npm pi-subagents package missing or duplicated');
 if (!s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK package missing');
 if (s.defaultProvider !== 'keep-provider' || s.defaultModel !== 'keep-model') throw new Error('main model defaults changed');
 if (roles.scout.model !== 'claude-bridge/claude-haiku-4-5' || roles.scout.thinking !== 'low') throw new Error('Claude scout profile missing');
@@ -169,8 +197,8 @@ test ! -e "$C/.claude"
 node - "$C/.pi/agent/settings.json" <<'NODE'
 const s = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
 const roles = s.subagents.agentOverrides;
-if (roles.scout.model !== 'openai-codex/gpt-6-luna') throw new Error('Codex scout profile missing');
-if (roles.oracle.model !== 'openai-codex/gpt-6.1-sol') throw new Error('Codex oracle profile missing');
+if (roles.scout.model !== 'openai/gpt-6-luna') throw new Error('Codex scout profile missing');
+if (roles.oracle.model !== 'openai/gpt-6.1-sol') throw new Error('Codex oracle profile missing');
 if (s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK added to Codex profile');
 NODE
 

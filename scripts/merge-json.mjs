@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // chezmoi modify_ helper: reads the live JSON file on stdin, writes the merged file to stdout.
 import fs from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 
 const [kind, sourcePath, profilePath] = process.argv.slice(2);
 if (!['settings', 'mcp'].includes(kind) || !sourcePath) {
@@ -39,6 +40,10 @@ function mergeDefaults(dst, src, prefix = '') {
     if (profile.packages !== undefined && !Array.isArray(profile.packages)) throw new Error(`${profilePath}: packages must be an array`);
     const oldPackages = Array.isArray(next.packages) ? next.packages : [];
     next.packages = [...new Set([...oldPackages, ...(source.packages ?? []), ...(profile.packages ?? [])])];
+    // Existing installs treat the old Git ref and canonical npm ref as separate packages.
+    if (next.packages.includes('npm:pi-subagents')) {
+      next.packages = next.packages.filter((pkg) => pkg !== 'git:github.com/nicobailon/pi-subagents');
+    }
     if (source.subagents) {
       if (next.subagents !== undefined && (!next.subagents || typeof next.subagents !== 'object' || Array.isArray(next.subagents))) throw new Error(`${targetPath}: subagents must be an object`);
       if (!next.subagents) next.subagents = {};
@@ -72,4 +77,4 @@ function mergeDefaults(dst, src, prefix = '') {
     }
   }
 
-process.stdout.write(`${JSON.stringify(next, null, 2)}\n`);
+process.stdout.write(isDeepStrictEqual(current, next) ? currentText : `${JSON.stringify(next, null, 2)}\n`);

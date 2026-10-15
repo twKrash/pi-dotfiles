@@ -18,7 +18,7 @@
     "npm:@twkrash/pi-session-inspector",
     "npm:pi-jev",
     "npm:pi-open-tui",
-    "git:github.com/nicobailon/pi-subagents"
+    "npm:pi-subagents"
   ],
   "subagents": {
     "agentOverrides": {
