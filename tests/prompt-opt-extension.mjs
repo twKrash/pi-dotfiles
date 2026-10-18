@@ -18,6 +18,10 @@ const executable = path.join(bin, "prompt-opt");
 await writeFile(executable, `#!/bin/sh
 printf '%s\n' "$@" > "$PROMPT_OPT_TEST_ARGS"
 cat >/dev/null
+if [ "\${1:-}" = --help ] || [ "\${1:-}" = -h ]; then
+  printf 'prompt-opt usage\n'
+  exit 0
+fi
 if [ "\${1:-}" = --history ]; then
   [ "$#" -gt 1 ] && printf 'optimized result\n'
   exit 0
@@ -46,6 +50,19 @@ try {
         [{ value: "--opt-effort=medium", label: "medium" }],
       );
       assert.deepEqual(
+        definition.getArgumentCompletions("--provider=a"),
+        [{ value: "--provider=anthropic", label: "anthropic" }],
+      );
+      assert.deepEqual(
+        definition.getArgumentCompletions("--model=sol"),
+        ["sol", "sol-6", "sol-6.1"].map(value => ({ value: `--model=${value}`, label: value })),
+      );
+      assert.deepEqual(
+        definition.getArgumentCompletions("--debug --opt-model=gpt-6-l"),
+        [{ value: "--debug --opt-model=gpt-6-luna", label: "gpt-6-luna" }],
+      );
+      assert.ok(definition.getArgumentCompletions("--help").some(({ value }) => value === "--help"));
+      assert.deepEqual(
         definition.getArgumentCompletions("--debug --opt-effort=med"),
         [{ value: "--debug --opt-effort=medium", label: "medium" }],
       );
@@ -60,6 +77,9 @@ try {
       setEditorText(value) { editorText = value; },
     },
   };
+
+  await handler("--help", ctx);
+  assert.equal(editorText, "prompt-opt usage");
 
   await handler("--debug", ctx);
   const args = await readFile(argsFile, "utf8");
