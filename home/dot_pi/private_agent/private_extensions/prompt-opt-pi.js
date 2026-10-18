@@ -2,16 +2,26 @@
 import { spawn } from "node:child_process";
 
 const allowedFlag = /^(?:--debug|--verbose|--(?:provider|model|effort|environment|opt-provider|opt-model|opt-effort)=[A-Za-z0-9._/-]+)$/;
-const completionFlags = ["--debug", "--verbose", "--provider=", "--model=", "--effort=", "--environment=", "--opt-provider=", "--opt-model=", "--opt-effort="];
+const completionFlags = ["-h", "--help", "--history", "--debug", "--verbose", "--provider=", "--model=", "--effort=", "--environment=", "--opt-provider=", "--opt-model=", "--opt-effort="];
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const targetModels = ["luna", "sol", "sol-6", "sol-6.1", "astra", "opus-5.5", "sonnet-5.5", "haiku-5.5"];
+const optimizerModels = [...targetModels, "gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+const valueCompletions = {
+  "--provider=": ["openai", "anthropic"],
+  "--model=": targetModels,
+  "--opt-provider=": ["openai", "anthropic"],
+  "--opt-model=": optimizerModels,
+  "--opt-effort=": thinkingLevels,
+};
 
 function getArgumentCompletions(prefix) {
   const separator = prefix.lastIndexOf(" ") + 1;
   const previous = prefix.slice(0, separator);
   const current = prefix.slice(separator);
-  const options = /^(--(?:opt-)?effort=)(.*)$/.exec(current);
-  const candidates = options
-    ? thinkingLevels.filter(level => level.startsWith(options[2])).map(level => ({ value: `${previous}${options[1]}${level}`, label: level }))
+  const optionValue = /^(--(?:opt-)?(?:provider|model|effort)=)(.*)$/.exec(current);
+  const values = optionValue && valueCompletions[optionValue[1]];
+  const candidates = values
+    ? values.filter(value => value.startsWith(optionValue[2])).map(value => ({ value: `${previous}${optionValue[1]}${value}`, label: value }))
     : completionFlags
         .filter(flag => flag.startsWith(current))
         .map(flag => ({ value: `${previous}${flag}`, label: flag }));
@@ -77,6 +87,14 @@ export default function (pi) {
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
       const raw = args?.trim() ?? "";
+      if (raw === "--help" || raw === "-h") {
+        try {
+          ctx.ui.setEditorText(await runOptimizer("", [raw]));
+        } catch (error) {
+          ctx.ui.notify(`Could not retrieve prompt-opt help: ${String(error)}`, "error");
+        }
+        return;
+      }
       const history = raw.match(/^--history(?:=([a-f0-9]{64}))?$/);
       if (history) { await retrieveHistory(history[1], ctx); return; }
       if (raw.startsWith("--history")) { ctx.ui.notify("Use --history or --history=<64-character request hash>", "warning"); return; }
