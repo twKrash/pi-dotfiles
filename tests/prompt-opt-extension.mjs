@@ -78,8 +78,10 @@ try {
     },
   };
 
+  editorText = "keep editor draft";
   await handler("--help", ctx);
-  assert.equal(editorText, "prompt-opt usage");
+  assert.equal(editorText, "keep editor draft");
+  assert.ok(notifications.includes("prompt-opt usage"));
 
   await handler("--debug", ctx);
   const args = await readFile(argsFile, "utf8");

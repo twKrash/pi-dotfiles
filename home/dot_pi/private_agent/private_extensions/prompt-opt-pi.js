@@ -89,7 +89,7 @@ export default function (pi) {
       const raw = args?.trim() ?? "";
       if (raw === "--help" || raw === "-h") {
         try {
-          ctx.ui.setEditorText(await runOptimizer("", [raw]));
+          ctx.ui.notify(await runOptimizer("", [raw]), "info");
         } catch (error) {
           ctx.ui.notify(`Could not retrieve prompt-opt help: ${String(error)}`, "error");
         }
