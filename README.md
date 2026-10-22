@@ -36,7 +36,7 @@ Each selected harness gets its own generated global instructions file; files of 
 |---|---|---|
 | `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local |
 | `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local |
-| `codex` | `~/.codex/AGENTS.md` | core + local |
+| `codex` | `~/.codex/AGENTS.md` | core + Codex addendum + local |
 
 Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
 

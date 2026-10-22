@@ -192,6 +192,8 @@ C="$TMP/home/home"
 cmp "$ROOT/home/dot_pi/private_agent/create_empty_MEMORY.md" "$C/.pi/agent/MEMORY.md"
 expected_instructions codex "$TMP/home/local.md" >"$TMP/expected-codex.md"
 cmp "$TMP/expected-codex.md" "$C/.codex/AGENTS.md"
+grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
+grep -q 'task-specific handoff note' "$C/.codex/AGENTS.md"
 if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
 test ! -e "$C/.claude"
 node - "$C/.pi/agent/settings.json" <<'NODE'
