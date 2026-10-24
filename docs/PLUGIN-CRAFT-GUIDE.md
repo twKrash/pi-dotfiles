@@ -109,7 +109,7 @@ Nothing is created, updated, transitioned, pushed, posted or applied in an exter
 
 A claim written into someone else's ticket, page or PR is confirmed against the system that owns the fact. When confirmation is unavailable, the claim is downgraded, never upgraded. Failures are detected by exit code and status, not by an empty body.
 
-*Why.* The worst bug class is "the create succeeds and the result is wrong, so nothing surfaces the error". Real cases: a resolution comment was about to be posted on two tickets whose repositories still had live findings, because the source feed was a strict subset of the scanner (33 of 84 repositories covered); seven epics were created carrying the sample epic's name because a cross-wired field was copied; a `400` exited 0 and produced zero findings, which read as "clean"; inactive scanner projects inflated counts so two repositories went from 0 critical/4 high to 2/28 with no visible symptom.
+*Why.* The worst bug class is "the create succeeds and the result is wrong, so nothing surfaces the error". Failure patterns include claims prepared from incomplete feeds, creates that copy a sample record's label, wrappers that treat failed requests as empty results, and aggregates distorted by inactive records.
 
 *How it shows up.* Outcome tables with three rows: confirmed, contradicted, unconfirmed, and only the first may write. After every create, read the object back and assert the fields that matter. After every link, re-read the links and report from the verified state. Filter to active or current before counting. Document the unstated assumption a check depends on, with the measured numbers. A positive control before trusting a negative search.
 
@@ -209,7 +209,7 @@ Every behaviour-bearing change bumps the version; documentation-only changes do 
 
 Every claim that a plugin is better is backed by a measured run: a timed real execution, a token report, a with/without comparison, a golden diff. Process that does not improve a measured outcome is removed.
 
-*Why.* A community plugin removed its subagent review loops after measuring a 25-minute overhead with no quality gain. A pipeline's chunk-to-disk refactor was justified by a 36 to 56 percent output-token reduction across four fixtures. An announcement that shows a 14-minute wall-clock fix as a step table is believed; one that says "faster" is not.
+*Why.* A review loop whose runtime exceeds its quality gain should be removed. A chunk-to-disk refactor is justified by measured token reductions on representative fixtures. Show reproducible timings or output reductions instead of saying "faster."
 
 *How it shows up.* Trigger evals with near-miss negatives shipped with the skill. A fixture corpus with goldens and a two-tier diff (structure first, then content with timestamps and ids normalised). A token report emitted by smoke runs. Leading and lagging indicators named in the decision record. Announcements that publish the timing table of a real run.
 
@@ -484,7 +484,7 @@ Learned on an issue tracker; the pattern generalises to any system with custom f
 
 #### 9.3 Chunk to disk
 
-The gather step writes `_gather_<thing>.json` or `.ndjson` files and a manifest; the state file holds their paths. The all-fields fetch had dominated the upfront budget; chunking cut output tokens by 36 to 56 percent on four fixtures. Every artifact carries the workflow prefix so cleanup is a glob scoped to one key; never a wholesale blast when several keys share the directory.
+The gather step writes `_gather_<thing>.json` or `.ndjson` files and a manifest; the state file holds their paths. When a full fetch dominates output, chunking results to disk can reduce token use; verify the change against representative fixtures. Every artifact carries the workflow prefix so cleanup is a glob scoped to one key; never a wholesale blast when several keys share the directory.
 
 #### 9.4 The subagent dispatch pattern
 
@@ -519,7 +519,7 @@ Only for stages with no data dependency, verified rather than assumed (one propo
 
 #### 9.7 Locks, resume, cleanup
 
-A lock file per key with a stale threshold (24 hours) and auto-removal, at an absolute path (a relative one did not guard anything). Resume from `completed_steps`. On early stop: release the lock, keep the scratch directory for debugging. Cleanup is an OPTIONAL gate and runs only after every artifact a later reader needs has been persisted somewhere durable. A full test plan once existed only in a scratch file the cleanup step deleted, and the ticket carried only a count; make cleanup conditional on the durable write's success.
+A lock file per key with a stale threshold (24 hours) and auto-removal, at an absolute path (a relative one did not guard anything). Resume from `completed_steps`. On early stop: release the lock, keep the scratch directory for debugging. Cleanup is an OPTIONAL gate and runs only after every artifact a later reader needs has been persisted somewhere durable. If a test plan exists only in scratch, cleanup can remove the evidence; make cleanup conditional on the durable write's success.
 
 #### 9.8 Audit log
 
@@ -676,18 +676,20 @@ Adapters: runtime manifests; one wrapper per runtime containing a single load di
 
 #### 14.2 Where each concept lives, by runtime
 
-State as of September 2026. Verify a cell before relying on it; these move quarterly.
+Snapshot as of September 2026, not a current-support guarantee. This matrix is documentation-derived, not tested against installed CLIs. In the combined Google column, unqualified Gemini CLI entries are legacy; Antigravity paths are listed only where documented in the current [migration guide](https://antigravity.google/docs/cli/gcli-migration). Do not infer other Antigravity behavior from Gemini CLI entries; verify cells against target-runtime docs before relying on them.
 
-| Concept | Claude Code | Codex | Cursor | Gemini CLI / Antigravity | GitHub Copilot | opencode | Windsurf (Devin) |
+| Concept | Claude Code | Codex | Cursor | Gemini CLI (legacy) / Antigravity CLI | GitHub Copilot | opencode | Windsurf (Devin) |
 |---|---|---|---|---|---|---|---|
 | Instruction file | `CLAUDE.md`, `.claude/rules/*.md`; import `AGENTS.md` via `@AGENTS.md` | `AGENTS.md`, `AGENTS.override.md` | `AGENTS.md`, root `CLAUDE.md`, `.cursor/rules/*.mdc` | `GEMINI.md` or configured `AGENTS.md` | `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md` (`applyTo`), `AGENTS.md` | `AGENTS.md` (falls back to `CLAUDE.md`) | `.devin/rules/*.md`, `AGENTS.md` |
-| Skill | `.claude/skills/`, plugin `skills/` | `.agents/skills/` plus `agents/openai.yaml` sidecar | `.cursor/skills/`, `.agents/skills/`, `.claude/skills/` | `.gemini/skills/`, `.agents/skills/`, extension `skills/` (user consent on activation) | `.github/skills/`, `.claude/skills/`, `.agents/skills/` | `.opencode/skills/`, `.claude/skills/`, `.agents/skills/` | `.windsurf/skills/`, `.agents/skills/`, `.claude/skills/` |
+| Skill | `.claude/skills/`, plugin `skills/` | `.agents/skills/` plus `agents/openai.yaml` sidecar | `.cursor/skills/`, `.agents/skills/`, `.claude/skills/` | Gemini CLI: `.gemini/skills/`; Antigravity CLI: workspace `.agents/skills/`, global `~/.gemini/antigravity-cli/skills/` | `.github/skills/`, `.claude/skills/`, `.agents/skills/` | `.opencode/skills/`, `.claude/skills/`, `.agents/skills/` | `.windsurf/skills/`, `.agents/skills/`, `.claude/skills/` |
 | Subagent | `agents/*.md` (rich frontmatter) | `.codex/agents/*.toml` | `.cursor/agents/*.md` (`readonly`, `is_background`); reads `.claude/agents/` | `.gemini/agents/*.md` (preview) | `.github/agents/*.agent.md`; VS Code reads `.claude/agents/` | `.opencode/agents/*.md` (`mode: subagent`) | not documented |
 | Slash command | `commands/*.md` (legacy) → skill | `~/.codex/prompts/*.md` (deprecated) → skill | `.cursor/commands/*.md` (legacy) → skill | `commands/*.toml` | `.github/prompts/*.prompt.md` (deprecated) → skill | `.opencode/commands/*.md` (`$ARGUMENTS`) | `.windsurf/workflows/*.md` |
-| Hook | `hooks/hooks.json`, PascalCase events, `hookSpecificOutput` | `~/.codex/hooks.json`, same shape, subset of events | `.cursor/hooks.json` `version: 1`, camelCase, `permission`, `additional_context` | settings `hooks`; `BeforeTool`, `AfterTool`, `BeforeAgent`; `decision` with no `ask` | `.github/hooks/*.json` `version: 1`, camelCase plus Pascal aliases, `permissionDecision` | TypeScript plugin hooks (`tool.execute.before`) | `.windsurf/hooks.json`, snake_case |
+| Hook | `hooks/hooks.json`, PascalCase events, `hookSpecificOutput` | `~/.codex/hooks.json`, same shape, subset of events | `.cursor/hooks.json` `version: 1`, camelCase, `permission`, `additional_context` | Gemini CLI: settings `hooks`; `BeforeTool`, `AfterTool`, `BeforeAgent`; `decision` with no `ask` | `.github/hooks/*.json` `version: 1`, camelCase plus Pascal aliases, `permissionDecision` | TypeScript plugin hooks (`tool.execute.before`) | [Devin Desktop Cascade](https://docs.devin.ai/desktop/cascade/hooks): `.devin/hooks.json`; legacy `.windsurf/hooks.json` only when the Devin file is absent or defines no hooks |
 | Permission rule | `permissions.allow/deny/ask`, `Bash(git *)` | `approval_policy`, `sandbox_mode` | `.cursor/cli.json` `permissions`, `Shell(ls)` | policy TOML `allow`, `deny`, `ask_user` | `--allow-tool 'shell(git:*)'` | `permission` map with glob patterns | admin allowlists |
-| MCP server | `.mcp.json` `mcpServers` | `[mcp_servers.x]` in `config.toml` | `.cursor/mcp.json` | settings `mcpServers` | `.vscode/mcp.json`, `.mcp.json`, `mcp-config.json` | `mcp.x` with `type: local` or `remote` | `mcp_config.json` |
+| MCP server | `.mcp.json` `mcpServers` | `[mcp_servers.x]` in `config.toml` | `.cursor/mcp.json` | Gemini CLI: `~/.gemini/settings.json` `mcpServers`; Antigravity CLI: workspace `.agents/mcp_config.json`, global `~/.gemini/config/mcp_config.json` | `.vscode/mcp.json`, `.mcp.json`, `mcp-config.json` | `mcp.x` with `type: local` or `remote` | `mcp_config.json` |
 | Plugin package | `.claude-plugin/plugin.json` plus `marketplace.json` | Agent Plugins root `plugin.json`; `.agents/plugins/marketplace.json` | `.cursor-plugin/plugin.json` or Agent Plugins | `gemini-extension.json`, Antigravity plugin | Agent Plugins `plugin.json`; `.github/plugin/marketplace.json` (also reads `.claude-plugin/`) | npm or git `plugin: []` | none |
+
+Antigravity skill and MCP paths above follow the current migration guide; other Google-column entries describe Gemini CLI unless explicitly labeled. Verify Antigravity support for those constructs separately.
 
 Cross-client discovery: most runtimes now also scan `.agents/skills/` (project and home); one major runtime reads only its own directory, so ship both or symlink.
 
@@ -726,7 +728,7 @@ The portable form of a tool allowlist: `interactive: false`, `network: read-only
 
 #### 14.7 Packaging
 
-Agent Plugins 1.0 covers `plugin.json` (with `$schema`, `name`, `version`, `description`, `author`, `license`, `keywords`, `extensions`), `skills/` and `mcp.json` with `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` expansion in MCP `args`, `env` and `cwd`. Commands, hooks, agents and LSP servers remain client-specific and live under client extension directories. Ship the neutral manifest and the runtime manifests side by side, and note in the README which runtimes ignore which. Skills-over-MCP is a draft, not a target yet.
+Agent Plugins 1.0 covers `plugin.json` (with `$schema`, `name`, `version`, `description`, `author`, `license`, `keywords`, `extensions`), `skills/` and `mcp.json` with `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` expansion in MCP `args`, `env` and `cwd`. Commands, hooks, agents and LSP servers remain client-specific and live under client extension directories. Ship the neutral manifest and the runtime manifests side by side, and note in the README which runtimes ignore which. The [MCP Skills extension has a stable specification](https://skills.extensions.modelcontextprotocol.io/specification/stable/skills), but client support is optional and varies; verify support before depending on it.
 
 ### 15. Shared artifacts across people and sessions
 
@@ -1181,7 +1183,7 @@ Validated: <what was run, on what, when>.
 ---
 ## Part IV. Trap catalogue
 
-Every entry happened. Format: what broke → why → the fix pattern. Search by symptom. When a new one bites, add it here with the date (P11).
+Catalog format: what broke → why → fix pattern. Search by symptom. Add a verified pattern when it will help prevent recurrence (P11).
 
 ### A. Shell and agent runtime
 
@@ -1224,8 +1226,8 @@ Every entry happened. Format: what broke → why → the fix pattern. Search by 
 | B13 | A failed API request was reported as zero findings | An error response was accepted as success | Exit non-zero on non-2xx; distinguish errors from empty results |
 | B14 | Resolution comments were queued despite live findings | The tracker feed did not cover the scanner's full scope | Verify negative results against their source of truth; report them as unconfirmed when unavailable |
 | B15 | A batch create failed because an unsupported ordering field was copied from a sample | The sample was treated as a writable schema | Exclude non-settable fields based on schema, not hard-coded IDs |
-| B16 | `Sponsor is required` on create | A user-type field keyed by `accountId` was skipped by code that handled only value/id dicts | Document the reshaping table; handle every shape |
-| B17 | Seven epics created with the sample epic's name | The name field cross-wires with the summary | Exclude label-type fields; read back and assert the summary after create |
+| B16 | Create rejected because a user-type field was omitted | The API expected a different representation from the one supplied | Document the accepted input shapes and handle each supported form |
+| B17 | Batch creates copied a sample item's name into new items | A field was cross-wired with the summary | Exclude non-writable fields; read back and assert the summary after create |
 | B18 | Story creates failed on fields the parent would set anyway | Required-on-create even though the parent overrides afterwards | Always send them; document the asymmetry |
 | B19 | Moved stories kept the old team | Re-parenting does not re-inherit; only create does | Set the team field after every move |
 | B20 | A deployed config had `field_ids: null` although bootstrap documents them | Bootstrap did not run to completion for that user | Tolerate `null`; discover by field name at runtime |
@@ -1338,7 +1340,7 @@ Verify against the current version before relying on a detail; these moved sever
 - Devin Desktop: [Cascade documentation](https://docs.devin.ai/desktop/cascade/).
 - Supply-chain research: Snyk's [ToxicSkills analysis](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/) and the Cloud Security Alliance's [agent context-poisoning note](https://labs.cloudsecurityalliance.org/research/csa-research-note-skill-md-agent-context-poisoning-20260506/).
 - Community practice: Anthropic's [Skill Creator plugin](https://claude.com/plugins/skill-creator), the [Superpowers project](https://github.com/obra/superpowers), and Simon Willison's [discussion of Claude Skills and MCP](https://simonwillison.net/2025/Oct/16/claude-skills/).
-- Practitioner experience informed the examples; the guide focuses on reusable engineering patterns rather than cataloguing specific projects or source records.
+- Examples illustrate reusable engineering patterns rather than cataloguing specific projects or source records.
 
 ## Appendix B. Maintaining this guide
 
