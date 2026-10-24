@@ -9,6 +9,10 @@ This section only specializes the instructions above for Pi. chezmoi appends it 
 - Global memory: `~/.pi/agent/MEMORY.md`.
 - Scratch space: `~/.pi/tmp/`. Never put project worktrees there.
 
+## Handoffs
+
+- Resolve the active session ID with Pi's `bash` tool (not `ctx_execute` or another context-mode shell) using `printf 'PI_SESSION_ID=%s\n' "$PI_SESSION_ID"`. Proceed only when the printed ID is non-empty.
+
 ## Delegation
 
 Use `pi-subagents` for delegated agent work. Do not use Herdr agent spawns for implementation, review, or other delegation unless the user explicitly requests Herdr or `pi-subagents` is unavailable.
