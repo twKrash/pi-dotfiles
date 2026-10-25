@@ -42,7 +42,9 @@ cat >"$TMP/mock-bin/pi" <<'MOCK_PI'
 if [ "${1:-}" = --version ]; then echo "${PI_VERSION:-1.1.0}"; exit 0; fi
 echo "pi-called" >>"$PI_CALLS"
 if [ -n "${PI_ARGS:-}" ]; then printf '%s\n' "$@" >"$PI_ARGS"; fi
+if [ -n "${PI_CWD:-}" ]; then printf '%s\n' "$PWD" >"$PI_CWD"; fi
 if [ -n "${MUTATE_LAB:-}" ]; then printf '%s\n' changed >>"$MUTATE_LAB/.runtime-change"; fi
+if [ "${FAIL_PI:-0}" = 1 ]; then exit 1; fi
 call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
 printf 'optimized-%s\n' "$call_count"
 MOCK_PI
@@ -63,7 +65,7 @@ grep -q 'Optimizer: *provider=openai-codex model=gpt-6-luna thinking=medium' "$T
 # With no xclip in PATH, both fresh and cached clipboard writes must use pbcopy.
 PBCOPY_BIN="$TMP/pbcopy-bin"
 mkdir -p "$PBCOPY_BIN"
-for tool in bash node dirname mktemp rm cp grep head wc tr cat; do
+for tool in bash node dirname mktemp rm mv cp grep head wc tr cat; do
   ln -s "$(command -v "$tool")" "$PBCOPY_BIN/$tool"
 done
 cat >"$PBCOPY_BIN/pi" <<'PBCOPY_PI'
@@ -117,6 +119,131 @@ grep -A1 -x -- '--extension' "$TMP/runner-ext-args" | tail -n 1 | grep -qx "$TMP
 if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/runner-ext-calls" PROMPT_OPT_RUNNER_EXTENSION="$TMP/missing-ext.js" \
   PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/runner-ext-missing-state" "$PROMPT_OPT" "$TMP/runner-ext-request.md" >/dev/null 2>"$TMP/runner-ext-missing.log"; then exit 1; fi
 grep -q 'runner extension does not exist' "$TMP/runner-ext-missing.log"
+# Context requests use configured tools, preserve context with --last, and never
+# reuse optimizer output that did not include the same live context.
+CONTEXT_PROJECT="$TMP/context-project"
+mkdir -p "$CONTEXT_PROJECT"
+printf 'context task\n' >"$TMP/context-request.md"
+CONTEXT_CALLS="$TMP/context-calls"
+for run in 1 2; do
+  (cd "$CONTEXT_PROJECT" && PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CALLS" PI_ARGS="$TMP/context-args" PI_CWD="$TMP/context-cwd" \
+    PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-state" \
+    "$PROMPT_OPT" --context "Look up Jira issue ABC-123 and ADR-17; no updates." "$TMP/context-request.md") >"$TMP/context-$run.out"
+done
+test "$(wc -l <"$CONTEXT_CALLS")" -eq 2
+test "$(cat "$TMP/context-cwd")" = "$CONTEXT_PROJECT"
+if grep -Eq '^--no-(extensions|mcp|skills)$|^--tools$' "$TMP/context-args"; then echo 'context run did not load configured tools' >&2; exit 1; fi
+grep -q 'configured tools available in this Pi environment' "$TMP/context-args"
+grep -q 'Do not modify project files or update Jira, wiki, or other external systems' "$TMP/context-args"
+grep -q 'Use retrieval operations only; if a source has no read-only operation, report it unavailable.' "$TMP/context-args"
+grep -q 'Look up Jira issue ABC-123 and ADR-17; no updates.' "$TMP/context-args"
+printf '#!/bin/sh\nexit 0\n' >"$TMP/context-editor"
+chmod +x "$TMP/context-editor"
+(cd "$TMP" && VISUAL="$TMP/context-editor" EDITOR="$TMP/context-editor" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CALLS" PI_ARGS="$TMP/context-last-args" PI_CWD="$TMP/context-last-cwd" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-state" "$PROMPT_OPT" --last) >"$TMP/context-last.out"
+test "$(wc -l <"$CONTEXT_CALLS")" -eq 3
+test "$(cat "$TMP/context-last-cwd")" = "$CONTEXT_PROJECT"
+grep -q 'Look up Jira issue ABC-123 and ADR-17; no updates.' "$TMP/context-last-args"
+grep -q 'Look up Jira issue ABC-123 and ADR-17; no updates.' "$TMP/context-state/prompt-opt/last-context.md"
+test ! -s "$TMP/context-state/prompt-opt/last-successful-context.txt"
+test ! -e "$TMP/context-state/prompt-opt/last-successful-input.md"
+CONTEXT_HISTORY=$(find "$TMP/context-state/prompt-opt/history" -mindepth 4 -maxdepth 4 -type f -name metadata.json | head -n 1)
+test -n "$CONTEXT_HISTORY"
+case "$CONTEXT_HISTORY" in */unverified/*) ;; *) echo 'context result incorrectly entered reusable history' >&2; exit 1 ;; esac
+# Context output must never be archived under the hash of its context-free task.
+ARCHIVE_STATE="$TMP/context-archive-state"
+ARCHIVE_CALLS="$TMP/context-archive-calls"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$ARCHIVE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$ARCHIVE_STATE" \
+  "$PROMPT_OPT" --context 'Inspect ADR-17.' "$TMP/context-request.md" >/dev/null
+CONTEXT_TASK_HASH=$(sha256sum "$TMP/context-request.md" | cut -d' ' -f1)
+if PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$ARCHIVE_STATE" \
+  "$PROMPT_OPT" --history "$CONTEXT_TASK_HASH" >/dev/null 2>"$TMP/context-raw-history.err"; then
+  echo 'context-dependent output was archived under the raw task hash' >&2; exit 1
+fi
+test ! -e "$ARCHIVE_STATE/prompt-opt/history/$CONTEXT_TASK_HASH"
+CONTEXT_EQUAL_CALLS="$TMP/context-equal-calls"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_EQUAL_CALLS" PI_ARGS="$TMP/context-equal-args" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-equal-state" \
+  "$PROMPT_OPT" --context='Inspect ADR-17 only.' "$TMP/context-request.md" >/dev/null
+grep -q 'Inspect ADR-17 only.' "$TMP/context-equal-args"
+# A valid context-free cached result replaces context output and remains adoptable.
+CONTEXT_CACHE_CALLS="$TMP/context-cache-calls"
+CONTEXT_CACHE_STATE="$TMP/context-cache-state"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CACHE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$CONTEXT_CACHE_STATE" \
+  "$PROMPT_OPT" "$TMP/context-request.md" >/dev/null
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CACHE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$CONTEXT_CACHE_STATE" \
+  "$PROMPT_OPT" --context 'Read ADR-17.' "$TMP/context-request.md" >/dev/null
+# Context output is retained only in unverified history, not the shared adoptable output.
+grep -qx 'optimized-1' "$CONTEXT_CACHE_STATE/prompt-opt/last-output.md"
+cmp "$TMP/context-request.md" "$CONTEXT_CACHE_STATE/prompt-opt/last-successful-input.md"
+test ! -s "$CONTEXT_CACHE_STATE/prompt-opt/last-successful-context.txt"
+CONTEXT_CACHE_OUTPUT=$(find "$CONTEXT_CACHE_STATE/prompt-opt/history" -mindepth 4 -maxdepth 4 -path '*/unverified/*' -type f -name optimized.md | head -n 1)
+test -n "$CONTEXT_CACHE_OUTPUT"
+grep -qx 'optimized-2' "$CONTEXT_CACHE_OUTPUT"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CACHE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$CONTEXT_CACHE_STATE" \
+  "$PROMPT_OPT" --debug "$TMP/context-request.md" >"$TMP/context-cache-hit.out" 2>"$TMP/context-cache-hit.log"
+grep -q 'phase=cache_hit' "$TMP/context-cache-hit.log"
+test "$(wc -l <"$CONTEXT_CACHE_CALLS")" -eq 2
+test ! -s "$CONTEXT_CACHE_STATE/prompt-opt/last-successful-context.txt"
+printf 'y\n' | PATH="$TMP/mock-bin:$PATH" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$CONTEXT_CACHE_STATE" \
+  "$PROMPT_OPT" --adopt-cache >"$TMP/context-cache-adopt.out" 2>"$TMP/context-cache-adopt.err"
+grep -q 'Cache pairing restored and recorded' "$TMP/context-cache-adopt.err"
+# If context output publication fails after replacing last-output, adoption must fail closed.
+PROVENANCE_BIN="$TMP/provenance-bin"
+PROVENANCE_STATE="$TMP/provenance-state"
+PROVENANCE_CALLS="$TMP/provenance-calls"
+mkdir -p "$PROVENANCE_BIN"
+REAL_CP=$(command -v cp)
+export REAL_CP
+cat >"$PROVENANCE_BIN/cp" <<'FAIL_CP'
+#!/bin/sh
+for destination do :; done
+if [ "${FAIL_SUCCESS_INPUT_COPY:-0}" = 1 ] && [ "${destination##*/}" = last-successful-input.md ]; then exit 1; fi
+exec "$REAL_CP" "$@"
+FAIL_CP
+chmod +x "$PROVENANCE_BIN/cp"
+printf 'provenance task\n' >"$TMP/provenance-request.md"
+PATH="$TMP/mock-bin:$PATH" PI_CALLS="$PROVENANCE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$PROVENANCE_STATE" \
+  "$PROMPT_OPT" --no-cache "$TMP/provenance-request.md" >/dev/null
+if PATH="$PROVENANCE_BIN:$TMP/mock-bin:$PATH" FAIL_SUCCESS_INPUT_COPY=1 PI_CALLS="$PROVENANCE_CALLS" \
+  PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$PROVENANCE_STATE" "$PROMPT_OPT" --no-cache "$TMP/provenance-request.md" \
+  >/dev/null 2>"$TMP/provenance-copy-failure.err"; then echo 'injected provenance copy failure unexpectedly succeeded' >&2; exit 1; fi
+grep -qx 'optimized-2' "$PROVENANCE_STATE/prompt-opt/last-output.md"
+grep -qx pending "$PROVENANCE_STATE/prompt-opt/last-successful-context.txt"
+if printf 'y\n' | PATH="$TMP/mock-bin:$PATH" PI_CALLS="$PROVENANCE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$PROVENANCE_STATE" \
+  "$PROMPT_OPT" --adopt-cache >/dev/null 2>"$TMP/provenance-adopt.err"; then echo 'incomplete output provenance was adopted' >&2; exit 1; fi
+grep -q 'output provenance is incomplete' "$TMP/provenance-adopt.err"
+CALLS_BEFORE_CONTEXT_REJECTIONS=$(wc -l <"$CONTEXT_CALLS")
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-state" \
+  "$PROMPT_OPT" --adopt-cache >/dev/null 2>"$TMP/context-adopt.err"; then echo 'context cache adoption was accepted' >&2; exit 1; fi
+grep -q 'cannot reuse a context-dependent result' "$TMP/context-adopt.err"
+# A failed context-free run clears the last context request but must not make the
+# preceding context-dependent output eligible for manual cache adoption.
+if PATH="$TMP/mock-bin:$PATH" FAIL_PI=1 PI_CALLS="$CONTEXT_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-state" \
+  "$PROMPT_OPT" --no-cache "$TMP/context-request.md" >/dev/null 2>"$TMP/context-free-failed.err"; then echo 'mock Pi failure unexpectedly succeeded' >&2; exit 1; fi
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-state" \
+  "$PROMPT_OPT" --adopt-cache >/dev/null 2>"$TMP/context-stale-adopt.err"; then echo 'context output was adopted despite no reusable output existing' >&2; exit 1; fi
+grep -q 'previous input or output is missing' "$TMP/context-stale-adopt.err"
+CALLS_AFTER_CONTEXT_FAILURE=$(wc -l <"$CONTEXT_CALLS")
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-history-state" \
+  "$PROMPT_OPT" --history --context 'Inspect ADR-17' >/dev/null 2>"$TMP/context-history.err"; then echo 'context history mode was accepted' >&2; exit 1; fi
+grep -q 'cannot be used with --history' "$TMP/context-history.err"
+test "$(wc -l <"$CONTEXT_CALLS")" -eq "$CALLS_AFTER_CONTEXT_FAILURE"
+CONTEXT_LINK_STATE="$TMP/context-link-state/prompt-opt"
+mkdir -p "$CONTEXT_LINK_STATE"
+printf 'outside context state' >"$TMP/context-outside"
+ln -s "$TMP/context-outside" "$CONTEXT_LINK_STATE/last-context.md"
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/context-link-calls" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-link-state" \
+  "$PROMPT_OPT" --context 'Inspect ADR-17' "$TMP/context-request.md" >/dev/null 2>&1; then echo 'symlinked context state was accepted' >&2; exit 1; fi
+test ! -s "$TMP/context-link-calls"
+test "$(cat "$TMP/context-outside")" = 'outside context state'
+CONTEXT_SUCCESS_LINK_STATE="$TMP/context-success-link-state/prompt-opt"
+mkdir -p "$CONTEXT_SUCCESS_LINK_STATE"
+ln -s "$TMP/context-outside" "$CONTEXT_SUCCESS_LINK_STATE/last-successful-context.txt"
+if PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/context-success-link-calls" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/context-success-link-state" \
+  "$PROMPT_OPT" --context 'Inspect ADR-17' "$TMP/context-request.md" >/dev/null 2>&1; then echo 'symlinked successful-context state was accepted' >&2; exit 1; fi
+test ! -s "$TMP/context-success-link-calls"
+test "$(cat "$TMP/context-outside")" = 'outside context state'
 # PROMPT_OPT_ANTHROPIC_PROVIDER routes a resolved "anthropic" optimizer through another Pi provider only.
 PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/anthropic-provider-state" PROMPT_OPT_ANTHROPIC_PROVIDER=claude-bridge \
   "$PROMPT_OPT" --model=opus-5.5 --opt-model=sonnet-5.5 --show-config >"$TMP/anthropic-provider.log"

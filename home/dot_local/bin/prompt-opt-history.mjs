@@ -61,7 +61,7 @@ function prepareState(state) {
   const history=path.join(state,'history');
   try { const stat=fs.lstatSync(history); if(stat.isSymbolicLink()||!stat.isDirectory()) fail(`unsafe history directory: ${history}`); }
   catch(error) { if(error.code!=='ENOENT') throw error; }
-  for(const name of ['last-input.md','last-output.md','last-successful-input.md','last-settings.txt','last-successful-settings.txt']) {
+  for(const name of ['last-input.md','last-output.md','last-successful-input.md','last-settings.txt','last-successful-settings.txt','last-context.md','last-context-cwd.txt','last-successful-context.txt']) {
     const target=path.join(state,name);
     try {
       const stat=fs.lstatSync(target);
@@ -117,6 +117,9 @@ function save(state,request,answer,metadata) {
   fs.writeFileSync(path.join(dir,'metadata.json'),JSON.stringify(meta,null,2),{flag:'wx',mode:0o600}); return dir;
 }
 function archiveLegacy(state) {
+  const context=optionalRegular(path.join(state,'last-context.md'));
+  const contextProvenance=optionalRegular(path.join(state,'last-successful-context.txt'));
+  if(context?.toString('utf8').trim()||contextProvenance?.toString('utf8').trim()) return;
   const output=optionalRegular(path.join(state,'last-output.md'));
   if(!output) return;
   const inputs=[];
