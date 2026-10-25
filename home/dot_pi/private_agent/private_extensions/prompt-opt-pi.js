@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 
 const allowedFlag = /^(?:--debug|--verbose|--(?:provider|model|effort|environment|opt-provider|opt-model|opt-effort)=[A-Za-z0-9._/-]+)$/;
-const completionFlags = ["-h", "--help", "--history", "--debug", "--verbose", "--provider=", "--model=", "--effort=", "--environment=", "--opt-provider=", "--opt-model=", "--opt-effort="];
+const completionFlags = ["-h", "--help", "--history", "--debug", "--verbose", "--context", "--provider=", "--model=", "--effort=", "--environment=", "--opt-provider=", "--opt-model=", "--opt-effort="];
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const targetModels = ["luna", "sol", "sol-6", "sol-6.1", "astra", "opus-5.5", "sonnet-5.5", "haiku-5.5"];
 const optimizerModels = [...targetModels, "gpt-6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
@@ -28,10 +28,58 @@ function getArgumentCompletions(prefix) {
   return candidates.length ? candidates : null;
 }
 
-function runOptimizer(task, flags, debugLog) {
+function tokenizeArguments(input) {
+  const tokens = [];
+  let token = "", quote = "", started = false;
+  for (let i = 0; i < input.length; i++) {
+    const character = input[i];
+    if (quote === "'") {
+      if (character === "'") quote = "";
+      else token += character;
+    } else if (quote === '"') {
+      if (character === '"') quote = "";
+      else if (character === "\\" && ['"', "\\"].includes(input[i + 1])) token += input[++i];
+      else token += character;
+    } else if (character === "\\") {
+      if (i + 1 >= input.length) throw new Error("trailing escape in command options");
+      token += input[++i]; started = true;
+    } else if (character === "'" || character === '"') {
+      quote = character; started = true;
+    } else if (/\s/.test(character)) {
+      if (started) tokens.push(token);
+      token = ""; started = false;
+    } else {
+      token += character; started = true;
+    }
+  }
+  if (quote) throw new Error("unclosed quote in command options");
+  if (started) tokens.push(token);
+  return tokens;
+}
+
+function parseArguments(input) {
+  const tokens = tokenizeArguments(input);
+  const flags = [];
+  let context = "", hasContext = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--context") {
+      if (hasContext) throw new Error("use --context only once");
+      if (i + 1 >= tokens.length) throw new Error("--context requires instructions");
+      context = tokens[++i]; hasContext = true;
+    } else if (token.startsWith("--context=")) {
+      if (hasContext) throw new Error("use --context only once");
+      context = token.slice("--context=".length); hasContext = true;
+    } else if (allowedFlag.test(token)) flags.push(token);
+    else throw new Error(`unsupported option: ${token}`);
+  }
+  return { flags, context, hasContext };
+}
+
+function runOptimizer(task, flags, debugLog, cwd = process.cwd()) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
-    const child = spawn("prompt-opt", [...flags, "-"], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("prompt-opt", [...flags, "-"], { cwd, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", errors = "", pendingErrorLine = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", chunk => { output += chunk; });
@@ -82,7 +130,7 @@ function retrieveHistory(hash, ctx) {
 
 export default function (pi) {
   pi.registerCommand("prompt-opt", {
-    description: "Optimize a prompt using the standalone prompt-opt runner",
+    description: "Optimize a prompt, optionally gathering read-only context with configured Pi tools",
     getArgumentCompletions,
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
@@ -98,20 +146,23 @@ export default function (pi) {
       const history = raw.match(/^--history(?:=([a-f0-9]{64}))?$/);
       if (history) { await retrieveHistory(history[1], ctx); return; }
       if (raw.startsWith("--history")) { ctx.ui.notify("Use --history or --history=<64-character request hash>", "warning"); return; }
-      const flags = raw ? raw.split(/\s+/) : [];
-      if (flags.some(flag => !allowedFlag.test(flag))) {
-        ctx.ui.notify("Use --model=sol --effort=high [--opt-model=luna] [--debug]", "warning"); return;
-      }
+      let parsed;
+      try { parsed = parseArguments(raw); }
+      catch (error) { ctx.ui.notify(`${String(error)}. Quote free-form context with --context "...".`, "warning"); return; }
+      const { flags, context, hasContext } = parsed;
+      const cliFlags = hasContext ? [...flags, "--context", context] : flags;
+      const debugFlags = hasContext ? [...flags, "--context=<redacted>"] : flags;
       const debug = flags.some(flag => flag === "--debug" || flag === "--verbose"), startedAt = Date.now();
       const debugLog = debug ? (event, details = {}) => pi.appendEntry("prompt-opt-debug", { timestamp: new Date().toISOString(), event, elapsed_ms: Date.now() - startedAt, ...details }) : undefined;
-      debugLog?.("command_start", { flags }); debugLog?.("editor_open");
+      debugLog?.("command_start", { flags: debugFlags }); debugLog?.("editor_open");
       const task = await ctx.ui.editor("Task to optimize", "");
       debugLog?.("editor_ready", { editor_elapsed_ms: Date.now() - startedAt, task_chars: task?.length ?? 0 });
       if (!task?.trim()) return;
-      ctx.ui.notify("Optimizing with isolated Pi runner...", "info");
-      debugLog?.("spawn_start", { command: "prompt-opt", flags: [...flags, "-"] });
+      ctx.ui.notify(hasContext ? "Optimizing with configured tools under a read-only context policy..." : "Optimizing with isolated Pi runner...", "info");
+      debugLog?.("spawn_start", { command: "prompt-opt", flags: [...debugFlags, "-"] });
       try {
-        const optimized = await runOptimizer(task, flags, debugLog);
+        const optimizerCwd = hasContext && typeof ctx.cwd === "string" && ctx.cwd ? ctx.cwd : process.cwd();
+        const optimized = await runOptimizer(task, cliFlags, debugLog, optimizerCwd);
         ctx.ui.setEditorText(optimized);
         debugLog?.("complete", { output_chars: optimized.length, total_elapsed_ms: Date.now() - startedAt });
         ctx.ui.notify(debug ? `Prompt optimized in ${((Date.now() - startedAt) / 1000).toFixed(1)}s; debug events saved in session` : "Optimized prompt is ready in editor and clipboard", "info");

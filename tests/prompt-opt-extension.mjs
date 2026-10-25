@@ -13,10 +13,14 @@ for (const name of Object.keys(process.env)) if (/^PROMPT_OPT_(TARGET|RUNNER|PI|
 const temp = await realpath(await mkdtemp(path.join(os.tmpdir(), "prompt-opt-extension-")));
 const bin = path.join(temp, "bin");
 const argsFile = path.join(temp, "args.txt");
+const cwdFile = path.join(temp, "cwd.txt");
+const contextWorkspace = path.join(temp, "context-workspace");
 await mkdir(bin);
+await mkdir(contextWorkspace);
 const executable = path.join(bin, "prompt-opt");
 await writeFile(executable, `#!/bin/sh
 printf '%s\n' "$@" > "$PROMPT_OPT_TEST_ARGS"
+pwd -P > "$PROMPT_OPT_TEST_CWD"
 cat >/dev/null
 if [ "\${1:-}" = --help ] || [ "\${1:-}" = -h ]; then
   printf 'prompt-opt usage\n'
@@ -33,14 +37,17 @@ await chmod(executable, 0o755);
 
 const oldPath = process.env.PATH;
 const oldArgsFile = process.env.PROMPT_OPT_TEST_ARGS;
+const oldCwdFile = process.env.PROMPT_OPT_TEST_CWD;
 process.env.PATH = `${bin}${path.delimiter}${oldPath ?? ""}`;
 process.env.PROMPT_OPT_TEST_ARGS = argsFile;
+process.env.PROMPT_OPT_TEST_CWD = cwdFile;
 
 try {
   let handler;
   const entries = [];
   const notifications = [];
   let editorText = "";
+  let taskText = "sample task";
   promptOptExtension({
     registerCommand(name, definition) {
       assert.equal(name, "prompt-opt");
@@ -62,6 +69,7 @@ try {
         [{ value: "--debug --opt-model=gpt-6-luna", label: "gpt-6-luna" }],
       );
       assert.ok(definition.getArgumentCompletions("--help").some(({ value }) => value === "--help"));
+      assert.ok(definition.getArgumentCompletions("--context").some(({ value }) => value === "--context"));
       assert.deepEqual(
         definition.getArgumentCompletions("--debug --opt-effort=med"),
         [{ value: "--debug --opt-effort=medium", label: "medium" }],
@@ -71,8 +79,9 @@ try {
   });
   const ctx = {
     hasUI: true,
+    cwd: contextWorkspace,
     ui: {
-      async editor() { return "sample task"; },
+      async editor() { return taskText; },
       notify(message) { notifications.push(message); },
       setEditorText(value) { editorText = value; },
     },
@@ -98,6 +107,24 @@ try {
   assert.ok(entries.some(({ type }) => type === "prompt-opt-debug"));
 
   entries.length = 0;
+  const context = 'Read "ADR-17" and Jira ABC-123; do not update either.';
+  taskText = "optimize using source context";
+  await handler(`--debug --context '${context}'`, ctx);
+  const contextArgs = await readFile(argsFile, "utf8");
+  assert.match(contextArgs, /--context/);
+  assert.match(contextArgs, /Read "ADR-17" and Jira ABC-123; do not update either\./);
+  assert.equal((await readFile(cwdFile, "utf8")).trim(), contextWorkspace);
+  assert.ok(notifications.some(message => /configured tools/i.test(message)));
+  assert.ok(!JSON.stringify(entries).includes(context), "debug metadata must redact free-form context");
+
+  const callsBeforeBadContext = entries.length;
+  editorText = "preserve editor draft";
+  await handler('--context "unterminated', ctx);
+  assert.equal(editorText, "preserve editor draft");
+  assert.ok(notifications.some(message => /quote|context/i.test(message)));
+  assert.equal(entries.length, callsBeforeBadContext);
+
+  entries.length = 0;
   await handler(`--history=${"a".repeat(64)}`, ctx);
   const historyArgs = await readFile(argsFile, "utf8");
   assert.match(historyArgs, /--history=a{64}/);
@@ -120,6 +147,8 @@ try {
   else process.env.PATH = oldPath;
   if (oldArgsFile === undefined) delete process.env.PROMPT_OPT_TEST_ARGS;
   else process.env.PROMPT_OPT_TEST_ARGS = oldArgsFile;
+  if (oldCwdFile === undefined) delete process.env.PROMPT_OPT_TEST_CWD;
+  else process.env.PROMPT_OPT_TEST_CWD = oldCwdFile;
   await rm(temp, { recursive: true, force: true });
 }
 
