@@ -140,6 +140,11 @@ cmp "$TMP/expected-pi.md" "$H/.pi/agent/AGENTS.md"
 expected_instructions claude "$LOCAL" >"$TMP/expected-claude.md"
 cmp "$TMP/expected-claude.md" "$H/.claude/CLAUDE.md"
 grep -q 'pi-subagents' "$H/.pi/agent/AGENTS.md"
+if grep -qE '^<<<<<<< |^=======|^>>>>>>> ' "$H/.pi/agent/AGENTS.md"; then exit 1; fi
+grep -Fq 'checking the callable tools' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'require a non-empty result' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'do not substitute a context-mode subprocess for the session ID' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'Check `graphify-out/` relative to that target root' "$H/.pi/agent/AGENTS.md"
 if grep -q 'pi-subagents\|codemode' "$H/.claude/CLAUDE.md"; then exit 1; fi
 test ! -e "$H/.pi/agent/APPEND_SYSTEM.md"
 test ! -e "$H/.codex"

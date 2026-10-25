@@ -183,6 +183,8 @@ Creating or opening a worktree does not authorize commits, pushes, merges, rebas
 
 `graphify-out/` is generated and worktree-local.
 
+Before using Graphify, resolve the task's actual target repository and its root (for example, with `pwd` and `git rev-parse --show-toplevel`). Check `graphify-out/` relative to that target root, not the agent's unrelated startup directory or a sibling checkout. Do not report the graph as absent until checking the target checkout.
+
 When working in a Git worktree:
 
 - resolve the current repository root with `git rev-parse --show-toplevel`;

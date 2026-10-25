@@ -11,7 +11,9 @@ This section only specializes the instructions above for Pi. chezmoi appends it 
 
 ## Handoffs
 
-- Resolve the active session ID with Pi's `bash` tool (not `ctx_execute` or another context-mode shell) using `printf 'PI_SESSION_ID=%s\n' "$PI_SESSION_ID"`. Proceed only when the printed ID is non-empty.
+- For investigation or implementation tasks, when `bash` is listed as callable, run `printf 'PI_SESSION_ID=%s\n' "$PI_SESSION_ID"` with that tool, require a non-empty result, and create a concise note at `~/.pi/tmp/handoffs/<PI_SESSION_ID>/<task-slug>.md` before work. If the current tool list does not expose `bash`, do not claim it is unavailable until checking the callable tools; if genuinely absent, do not substitute a context-mode subprocess for the session ID—explain the missing capability and pause only work that requires the ID.
+- Keep `~/.pi/tmp/handoffs/<PI_SESSION_ID>/ACTIVE.md` pointed at the current note. Update it at material milestones and completion; after compaction or resuming, use an available file-reading tool to read the pointer and note, then verify against current instructions and repository state.
+- Never write under the shared handoffs root when the ID is empty. Pass the literal ID to context-mode calls when session scoping is required, and never include secrets in handoffs.
 
 ## Delegation
 
