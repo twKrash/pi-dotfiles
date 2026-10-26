@@ -38,6 +38,8 @@ Draft, investigate, test, and plan freely.
 
 Before any externally visible or irreversible action, show the user the exact intended action or payload and get explicit approval. This includes posting comments or reviews, transitioning tickets, publishing documentation, sending messages, merging, deploying, applying infrastructure changes, deleting shared data, and bypassing repository protections.
 
+A direct user request that specifies the action and its content (for example, "add a todo X" or "post this comment") is that approval; show the payload first only when you filled in material details the user did not give.
+
 Approval applies only to the specific action approved. Delegation or automation never grants additional authority.
 
 ## Memory discipline
