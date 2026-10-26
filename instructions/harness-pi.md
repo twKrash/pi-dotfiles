@@ -7,12 +7,6 @@ This section only specializes the instructions above for Pi.
 - Global memory: `~/.pi/agent/MEMORY.md`.
 - Scratch space: `~/.pi/tmp/`. Never put project worktrees there.
 
-## Handoffs
-
-- For multi-step investigation or implementation work (delegated, spanning many tool calls, or likely to outlive a compaction), when `bash` is listed as callable, run `printf 'PI_SESSION_ID=%s\n' "$PI_SESSION_ID"` with that tool, require a non-empty result, and create a concise note at `~/.pi/tmp/handoffs/<PI_SESSION_ID>/<task-slug>.md` before work. If the current tool list does not expose `bash`, do not claim it is unavailable until checking the callable tools; if genuinely absent, do not substitute a context-mode subprocess for the session ID—explain the missing capability and pause only work that requires the ID. Skip the note for single-step requests and quick checks.
-- Keep `~/.pi/tmp/handoffs/<PI_SESSION_ID>/ACTIVE.md` pointed at the current note. Update it at material milestones and completion; after compaction or resuming, use an available file-reading tool to read the pointer and note, then verify against current instructions and repository state.
-- Never write under the shared handoffs root when the ID is empty. When a context-mode tool takes a session ID, pass this literal ID. Never include secrets in handoffs.
-
 ## Skills
 
 Install the Graphify skill with `graphify install --platform pi` and invoke it as `/skill:graphify`.
