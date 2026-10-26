@@ -68,8 +68,11 @@ mkdir -p "$H/.pi/agent/extensions/pi-permission-system"
 printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
 printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
 ln -s "$TMP/hybrid/linked.md" "$H/.pi/agent/AGENTS.md"
-node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" <<'NODE'
+node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" "$H/.pi/agent/pi-goal.json" <<'NODE'
 const fs = require('fs');
+fs.writeFileSync(process.argv[4], JSON.stringify({
+  rpc: {enabled: false, localNote: 'keep'}, continuationLimits: {automaticTurns: 7}, localOnly: {note: 'keep'}
+}));
 fs.writeFileSync(process.argv[2], JSON.stringify({
   packages: ['npm:custom-package', 'git:github.com/nicobailon/pi-subagents'], defaultProvider: 'keep-provider', defaultModel: 'keep-model', userSetting: 'keep',
   subagents: {agentOverrides: {scout: {model: 'local/old', thinking: 'high', tools: ['read', 'grep']}, worker: {tools: ['read', 'edit', 'write']}}}
@@ -147,8 +150,14 @@ if grep -q 'pi-subagents\|codemode' "$H/.claude/CLAUDE.md"; then exit 1; fi
 test ! -e "$H/.pi/agent/APPEND_SYSTEM.md"
 test ! -e "$H/.codex"
 # JSON is merged, not replaced: repo defaults and the Claude profile are added, local values kept.
-node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" <<'NODE'
+node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" "$H/.pi/agent/pi-goal.json" <<'NODE'
 const fs = require('fs');
+const goalSettings = JSON.parse(fs.readFileSync(process.argv[4], 'utf8'));
+// Managed-run RPC is enabled for the extension; every unrelated local setting survives the merge.
+if (goalSettings.rpc.enabled !== true) throw new Error('pi-goal rpc not enabled');
+if (goalSettings.rpc.localNote !== 'keep') throw new Error('unrelated rpc settings lost');
+if (goalSettings.continuationLimits.automaticTurns !== 7) throw new Error('continuation limits lost');
+if (goalSettings.localOnly.note !== 'keep') throw new Error('unknown local pi-goal settings lost');
 const s = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const m = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const roles = s.subagents.agentOverrides;

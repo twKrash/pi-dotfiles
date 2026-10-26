@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 const [kind, sourcePath, profilePath] = process.argv.slice(2);
-if (!['settings', 'mcp'].includes(kind) || !sourcePath) {
-  console.error('usage: merge-json.mjs settings|mcp SOURCE [PROFILE] <current.json >merged.json');
+if (!['settings', 'mcp', 'pi-goal'].includes(kind) || !sourcePath) {
+  console.error('usage: merge-json.mjs settings|mcp|pi-goal SOURCE [PROFILE] <current.json >merged.json');
   process.exit(2);
 }
 const targetPath = 'current file';
@@ -65,6 +65,16 @@ function mergeDefaults(dst, src, prefix = '') {
           if (values[field] !== undefined) next.subagents.agentOverrides[role][field] = values[field];
         }
       }
+    }
+  } else if (kind === 'pi-goal') {
+    // Enforce repo keys (rpc.enabled) and keep every other local setting and unknown field.
+    for (const [key, value] of Object.entries(source)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (next[key] !== undefined && (!next[key] || typeof next[key] !== 'object' || Array.isArray(next[key]))) {
+          throw new Error(`${targetPath}: ${key} must be an object`);
+        }
+        next[key] = {...(next[key] ?? {}), ...value};
+      } else next[key] = value;
     }
   } else {
     if (next.mcpServers !== undefined && (!next.mcpServers || typeof next.mcpServers !== 'object' || Array.isArray(next.mcpServers))) throw new Error(`${targetPath}: mcpServers must be an object`);
