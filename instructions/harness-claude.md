@@ -5,7 +5,7 @@ This section only specializes the instructions above for Claude Code.
 ## Locations
 
 - Instruction files: "global `AGENTS.md`" above means this file (`~/.claude/CLAUDE.md`); a repository's `CLAUDE.md` counts as its repository-local `AGENTS.md`.
-- Global memory: Claude Code's memory (user and project `CLAUDE.md` files and its memory directory) is the global `MEMORY.md` referred to above.
+- Global memory: Claude Code's auto-memory directory is the global `MEMORY.md` referred to above. `CLAUDE.md` files are instructions, not memory.
 - Scratch space: the session scratchpad directory when one is provided; otherwise a fresh temporary directory.
 
 ## Delegation
