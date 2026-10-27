@@ -13,6 +13,8 @@ export HOME
 PROMPT_OPT="$ROOT/home/dot_local/bin/executable_prompt-opt"
 HISTORY_HELPER="$ROOT/home/dot_local/bin/prompt-opt-history.mjs"
 LAB="$ROOT/home/ai/prompt_engineering"
+"$PROMPT_OPT" --help >"$TMP/prompt-help.log"
+grep -Fq 'direct CLI runs do not start a Goal' "$TMP/prompt-help.log"
 
 # Provider-only overrides reset incompatible inherited target-model defaults.
 PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state" \
@@ -670,6 +672,16 @@ printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" P
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
   GOAL_OUTPUT_FILE="$TMP/goal-fenced.json" "$PROMPT_OPT" --goal - >"$TMP/goal-fenced.out"
 grep -q '"status":"handoff-written"' "$TMP/goal-fenced.out"
+# A malformed optimizer envelope must preserve the raw answer for recovery.
+printf 'Here is the result:\n{"optimized_prompt":"recoverable prompt","goal_objective":"recoverable objective"}\n' >"$TMP/goal-chatty.json"
+if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  GOAL_OUTPUT_FILE="$TMP/goal-chatty.json" "$PROMPT_OPT" --goal - >"$TMP/goal-chatty.out" 2>"$TMP/goal-chatty.err"; then
+  echo 'goal mode accepted a chatty malformed envelope' >&2; exit 1
+fi
+grep -Fq 'Here is the result:' "$TMP/goal-chatty.err"
+grep -Fq '"optimized_prompt":"recoverable prompt"' "$TMP/goal-chatty.err"
+test ! -s "$TMP/goal-chatty.out"
 # Reject objectives that exceed pi-goal's documented limit.
 node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({optimized_prompt:"prompt",goal_objective:"x".repeat(4000)}))' "$TMP/goal-too-long.json"
 if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \

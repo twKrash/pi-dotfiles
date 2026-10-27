@@ -16,9 +16,9 @@ usage() {
   cat <<'HELP'
 --last | --adopt-cache | --history [HASH] | FILE | - [OPTIONS]
 
-  --goal                 Persist the optimized prompt to a session handoff and,
-                         inside Pi, start the Goal through pi-goal managed-run RPC.
-                         Never runs the task itself.
+  --goal                 Persist the optimized prompt to a session handoff.
+                         Goal activation is handled only by the Pi extension;
+                         direct CLI runs do not start a Goal or execute the task.
 
   (no input)             Edit a new task with $VISUAL/$EDITOR (default: nvim).
   --last                 Edit the previous task; reuse output if unchanged.
@@ -622,6 +622,7 @@ try {
 }
 NODE
   then
+    cat -- "$answer" >&2
     die 'goal handoff failed; nothing was started'
   fi
   cp -- "$goal_output" "$answer"
