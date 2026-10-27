@@ -180,8 +180,23 @@ try {
   process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS = "50";
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
-  assert.match(editorText, /Goal not started: no activation confirmation arrived/);
-  assert.ok(notifications.some(message => /no activation confirmation/i.test(message)));
+  assert.match(editorText, /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./);
+  assert.ok(notifications.some(message => /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./.test(message)));
+
+  // If the session switches while the optimizer runs, do not activate in the new session.
+  bus.reset();
+  const sessionBeforeOptimization = activeSessionId;
+  const editor = ctx.ui.editor;
+  ctx.ui.editor = async (...args) => {
+    const task = await editor(...args);
+    activeSessionId = "session-switched-during-optimization";
+    return task;
+  };
+  await handler("--goal", ctx);
+  ctx.ui.editor = editor;
+  activeSessionId = sessionBeforeOptimization;
+  assert.equal(bus.emits.length, 0, "a session change must prevent Goal activation");
+  assert.ok(notifications.some(message => /Session changed during optimization; Goal not started\./.test(message)));
 
   assert.equal(bus.outstandingSubscriptions(), 0, "the run channel subscription is released");
 

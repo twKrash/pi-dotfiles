@@ -173,7 +173,7 @@ function describeGoalFailure({ code, message }) {
   switch (code) {
     case "GOAL_ALREADY_EXISTS": return "a Goal already exists in this session and was left unchanged; run /goal clear before retrying";
     case "RPC_DISABLED": return "managed-run RPC is disabled; enable it in /goal → Settings";
-    case "NO_CONFIRMATION": return "no activation confirmation arrived; check /goal status";
+    case "NO_CONFIRMATION": return "Goal activation unconfirmed.\nCheck /goal status before retrying.";
     case "RPC_UNAVAILABLE": return `the Goal event bus is unavailable (${message})`;
     default: return `${code}: ${message}`;
   }
@@ -263,6 +263,12 @@ export default function (pi) {
         const optimized = await runOptimizer(task, cliFlags, debugLog, optimizerCwd, goalMode ? { ...process.env, PI_SESSION_ID: goalSessionId } : undefined);
         if (goalMode) {
           const handoff = parseGoalHandoff(optimized);
+          if (currentSessionId(ctx) !== goalSessionId) {
+            const status = "Session changed during optimization; Goal not started.";
+            ctx.ui.setEditorText(`Goal handoff: ${handoff.handoff_path}\n${status}`);
+            ctx.ui.notify(status, "error");
+            return;
+          }
           const activation = await activateGoal(pi, handoff.objective, debugLog);
           const status = activation.ok ? `Goal started (goal ${activation.goalId})` : `Goal not started: ${describeGoalFailure(activation)}`;
           debugLog?.("goal_activation", { ok: activation.ok, code: activation.code, total_elapsed_ms: Date.now() - startedAt });
