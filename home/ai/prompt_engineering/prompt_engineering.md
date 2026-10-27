@@ -175,6 +175,12 @@ If the user requests "prompt only", return only the optimized prompt.
 
 Do not execute the underlying task in any of these modes unless explicitly requested.
 
+## Goal Handoff Mode
+
+For the explicit `/prompt-opt --goal` option only, optimize the request normally and produce the complete, independently executable prompt first. Then derive `goal_objective` from that prompt: a concise, outcome-oriented statement of the same task and its non-negotiable constraints, without adding or dropping requirements.
+
+Return both values to the handoff workflow. It stores the complete prompt as the authoritative session handoff, extends the objective with that file's path and its read-before-execution, post-compaction, and acceptance-verification instructions, and starts the Goal through pi-goal managed-run RPC. Do not execute the task, invoke `/goal`, or start another agent. Without `--goal`, preserve the existing output contract.
+
 ## Success Criteria
 
 An optimized prompt should:

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Enable pi-goal managed-run RPC so installed extensions can start Goals. Other settings are kept.
+exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | shellQuote }} pi-goal {{ joinPath .chezmoi.workingTree "agent/pi-goal.json" | shellQuote }}

@@ -13,6 +13,8 @@ export HOME
 PROMPT_OPT="$ROOT/home/dot_local/bin/executable_prompt-opt"
 HISTORY_HELPER="$ROOT/home/dot_local/bin/prompt-opt-history.mjs"
 LAB="$ROOT/home/ai/prompt_engineering"
+"$PROMPT_OPT" --help >"$TMP/prompt-help.log"
+grep -Fq 'direct CLI runs do not start a Goal' "$TMP/prompt-help.log"
 
 # Provider-only overrides reset incompatible inherited target-model defaults.
 PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/prompt-state" \
@@ -43,10 +45,20 @@ if [ "${1:-}" = --version ]; then echo "${PI_VERSION:-1.1.0}"; exit 0; fi
 echo "pi-called" >>"$PI_CALLS"
 if [ -n "${PI_ARGS:-}" ]; then printf '%s\n' "$@" >"$PI_ARGS"; fi
 if [ -n "${PI_CWD:-}" ]; then printf '%s\n' "$PWD" >"$PI_CWD"; fi
+if [ -n "${GOAL_INPUT_CAPTURE:-}" ] && [ "${1:-}" != --version ]; then
+  for pi_arg do :; done
+  printf '%s' "$pi_arg" >"$GOAL_INPUT_CAPTURE"
+fi
 if [ -n "${MUTATE_LAB:-}" ]; then printf '%s\n' changed >>"$MUTATE_LAB/.runtime-change"; fi
 if [ "${FAIL_PI:-0}" = 1 ]; then exit 1; fi
 call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
-printf 'optimized-%s\n' "$call_count"
+if [ "${GOAL_MODE:-0}" = 1 ]; then
+  if [ -n "${GOAL_OUTPUT_FILE:-}" ]; then cat "$GOAL_OUTPUT_FILE"; else
+    printf '%s\n' '{"optimized_prompt":"Complete execution prompt\nwith all requirements.","goal_objective":"Implement the \"requested\" feature while preserving user'"'"'s stated constraints and C:\\tools paths."}'
+  fi
+else
+  printf 'optimized-%s\n' "$call_count"
+fi
 MOCK_PI
 cat >"$TMP/mock-bin/xclip" <<'MOCK_XCLIP'
 #!/bin/sh
@@ -559,5 +571,126 @@ grep -q 'phase=pi_start' "$TMP/prompt-run.log"
 grep -q 'phase=pi_complete status=0' "$TMP/prompt-run.log"
 grep -q 'phase=clipboard_complete' "$TMP/prompt-run.log"
 grep -q 'phase=complete' "$TMP/prompt-run.log"
+# --goal persists the complete optimized prompt and emits a machine-readable handoff result.
+GOAL_HOME="$TMP/goal space 'and\" quote O'Brien"
+mkdir -p "$GOAL_HOME"
+GOAL_SESSION=01a17a4d-c236-7573-b7e3-60a763bbbec8
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
+  GOAL_MODE=1 GOAL_INPUT_CAPTURE="$TMP/goal-input" CLIP_CAPTURE="$TMP/goal-clip" \
+  "$PROMPT_OPT" --goal --context 'inspect read-only sources' - >"$TMP/goal-output.json" 2>"$TMP/goal-output.err"
+printf 'Complete execution prompt\nwith all requirements.' >"$TMP/expected-goal-prompt"
+node - "$TMP/goal-output.json" "$TMP/expected-goal-objective.txt" "$GOAL_HOME/.pi/agent/handoffs/$GOAL_SESSION" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const parsed = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const [sessionDir] = [process.argv[4]];
+assert.equal(parsed.status, "handoff-written");
+assert.ok(parsed.handoff_path.startsWith(`${sessionDir}/`), "handoff must live under the session directory");
+assert.ok(parsed.handoff_path.endsWith(".md"));
+const expected = `Implement the "requested" feature while preserving user's stated constraints and C:\\tools paths. The authoritative task specification is at: \`${parsed.handoff_path}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+assert.equal(parsed.objective, expected);
+assert.ok(parsed.objective.length <= 4000);
+fs.writeFileSync(process.argv[3], parsed.handoff_path);
+NODE
+GOAL_HANDOFF=$(cat "$TMP/expected-goal-objective.txt")
+test -n "$GOAL_HANDOFF"
+test "$(dirname "$GOAL_HANDOFF")" = "$GOAL_HOME/.pi/agent/handoffs/$GOAL_SESSION"
+cmp "$GOAL_HANDOFF" "$TMP/expected-goal-prompt"
+# No copy-ready command, no re-printed prompt, exactly one optimizer call, no prompt-opt state writes.
+! grep -q '^/goal ' "$TMP/goal-output.json"
+! grep -Fq '/goal Complete' "$TMP/goal-output.json"
+! grep -Fq 'Complete execution prompt' "$TMP/goal-output.json"
+test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 1
+test ! -e "$TMP/goal-state/prompt-opt"
+grep -q 'OPT-IN GOAL HANDOFF OUTPUT CONTRACT' "$TMP/goal-input"
+grep -q '"goal_objective"' "$TMP/goal-input"
+! grep -q '"objective_summary"' "$TMP/goal-input"
+grep -qi 'do not execute the task' "$TMP/goal-input"
+grep -q 'CONTEXT REQUEST:' "$TMP/goal-input"
+grep -q 'inspect read-only sources' "$TMP/goal-input"
+grep -q 'Goal handoff saved to: ' "$TMP/goal-output.err"
+grep -q 'Goal activation is owned by the Pi extension' "$TMP/goal-output.err"
+test "$(node -e 'console.log((require("node:fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$GOAL_HANDOFF")" = 600
+test "$(node -e 'console.log((require("node:fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$(dirname "$GOAL_HANDOFF")")" = 700
+test "$(node -e 'console.log((require("node:fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$(dirname "$(dirname "$GOAL_HANDOFF")")")" = 700
+# A second run must retain the first handoff and use a distinct path.
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
+  GOAL_MODE=1 CLIP_CAPTURE="$TMP/goal-clip" "$PROMPT_OPT" --goal - >"$TMP/goal-output-2.json"
+GOAL_HANDOFF_2=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).handoff_path)' "$TMP/goal-output-2.json")
+test "$GOAL_HANDOFF" != "$GOAL_HANDOFF_2"
+cmp "$GOAL_HANDOFF" "$TMP/expected-goal-prompt"
+test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 2
+# Clipboard problems cannot block a persisted handoff, because goal mode does not use the clipboard.
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
+  GOAL_MODE=1 CLIP_CAPTURE="$TMP/goal-clip" FAIL_CLIPBOARD=1 "$PROMPT_OPT" --goal - >"$TMP/goal-clipboard-failure.json"
+node -e 'const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (v.status !== "handoff-written") process.exit(1)' "$TMP/goal-clipboard-failure.json"
+test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 3
+# Missing session identity must fail without printing a handoff result.
+if printf 'original task\n' | env -u PI_SESSION_ID HOME="$GOAL_HOME" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 "$PROMPT_OPT" --goal - >"$TMP/goal-missing-session.out" 2>"$TMP/goal-missing-session.err"; then
+  echo 'goal mode accepted missing PI_SESSION_ID' >&2; exit 1
+fi
+grep -q 'PI_SESSION_ID' "$TMP/goal-missing-session.err"
+test ! -s "$TMP/goal-missing-session.out"
+# Refuse a handoff directory symlink and do not report a handoff result.
+GOAL_BROKEN_HOME="$TMP/goal-broken-home"
+mkdir -p "$GOAL_BROKEN_HOME/.pi/agent" "$TMP/elsewhere"
+ln -s "$TMP/elsewhere" "$GOAL_BROKEN_HOME/.pi/agent/handoffs"
+if printf 'original task\n' | env HOME="$GOAL_BROKEN_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
+  GOAL_MODE=1 "$PROMPT_OPT" --goal - >"$TMP/goal-fs-failure.out" 2>"$TMP/goal-fs-failure.err"; then
+  echo 'goal mode followed a handoff-directory symlink' >&2; exit 1
+fi
+grep -q 'unsafe handoff directory' "$TMP/goal-fs-failure.err"
+test ! -s "$TMP/goal-fs-failure.out"
+# A host with no clipboard tool must still be able to persist a handoff.
+GOAL_MIN_BIN="$TMP/goal-min-bin"
+mkdir -p "$GOAL_MIN_BIN"
+for tool in bash node dirname mktemp rm mv cp grep head wc tr cat sed; do
+  ln -sf "$(command -v "$tool")" "$GOAL_MIN_BIN/$tool"
+done
+cp "$TMP/mock-bin/pi" "$GOAL_MIN_BIN/pi"
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$GOAL_MIN_BIN" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  "$PROMPT_OPT" --goal - >"$TMP/goal-no-clipboard.json" 2>"$TMP/goal-no-clipboard.err"
+node -e 'const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (v.status !== "handoff-written") process.exit(1)' "$TMP/goal-no-clipboard.json"
+! grep -q 'xclip\|pbcopy' "$TMP/goal-no-clipboard.err"
+# Pi session ids are path-safe ids, not necessarily UUIDs.
+GOAL_NAMED_SESSION='my_session.1'
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_NAMED_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  "$PROMPT_OPT" --goal - >"$TMP/goal-named-session.json"
+node -e '
+const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+if (!v.handoff_path.includes(process.argv[2])) process.exit(1);
+' "$TMP/goal-named-session.json" "/$GOAL_NAMED_SESSION/"
+# A fenced JSON answer is still a usable handoff.
+printf '```json\n{"optimized_prompt":"fenced prompt","goal_objective":"fenced objective"}\n```\n' >"$TMP/goal-fenced.json"
+printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  GOAL_OUTPUT_FILE="$TMP/goal-fenced.json" "$PROMPT_OPT" --goal - >"$TMP/goal-fenced.out"
+grep -q '"status":"handoff-written"' "$TMP/goal-fenced.out"
+# A malformed optimizer envelope must preserve the raw answer for recovery.
+printf 'Here is the result:\n{"optimized_prompt":"recoverable prompt","goal_objective":"recoverable objective"}\n' >"$TMP/goal-chatty.json"
+if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  GOAL_OUTPUT_FILE="$TMP/goal-chatty.json" "$PROMPT_OPT" --goal - >"$TMP/goal-chatty.out" 2>"$TMP/goal-chatty.err"; then
+  echo 'goal mode accepted a chatty malformed envelope' >&2; exit 1
+fi
+grep -Fq 'Here is the result:' "$TMP/goal-chatty.err"
+grep -Fq '"optimized_prompt":"recoverable prompt"' "$TMP/goal-chatty.err"
+test ! -s "$TMP/goal-chatty.out"
+# Reject objectives that exceed pi-goal's documented limit.
+node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({optimized_prompt:"prompt",goal_objective:"x".repeat(4000)}))' "$TMP/goal-too-long.json"
+if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
+  GOAL_OUTPUT_FILE="$TMP/goal-too-long.json" "$PROMPT_OPT" --goal - >"$TMP/goal-too-long.out" 2>"$TMP/goal-too-long.err"; then
+  echo 'goal mode accepted an oversized objective' >&2; exit 1
+fi
+grep -q '4000-character limit' "$TMP/goal-too-long.err"
+test ! -s "$TMP/goal-too-long.out"
+
 node "$ROOT/tests/prompt-opt-extension.mjs"
 printf 'prompt-opt tests passed\n'
