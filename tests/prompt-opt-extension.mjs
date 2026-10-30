@@ -443,8 +443,8 @@ try {
   );
   assert.equal(
     editorText,
-    taskText,
-    "the draft is restored when the handoff fails",
+    "preserve draft",
+    "Goal-mode failure leaves the prompt input untouched",
   );
 
   // A runtime without the event bus must fail honestly instead of claiming a Goal.

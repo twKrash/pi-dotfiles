@@ -559,7 +559,7 @@ export default function (pi) {
         );
       } catch (error) {
         debugLog?.("failed", { total_elapsed_ms: Date.now() - startedAt });
-        ctx.ui.setEditorText(task);
+        if (!goalMode) ctx.ui.setEditorText(task);
         ctx.ui.notify(`Prompt optimization failed: ${String(error)}`, "error");
       }
     },
