@@ -1,6 +1,6 @@
 // Pi adapter for the standalone prompt-opt CLI.
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { runGoalFlow } from "./prompt-opt-pi/goal-flow.js";
 
 const allowedFlag =
   /^(?:--goal|--debug|--verbose|--(?:provider|model|effort|environment|opt-provider|opt-model|opt-effort)=[A-Za-z0-9._/-]+)$/;
@@ -240,30 +240,6 @@ function retrieveHistory(hash, ctx) {
   });
 }
 
-// pi-goal managed-run RPC: subscribe to the run channel, then emit the start request.
-const GOAL_START_CHANNEL = "pi-goal:start";
-const GOAL_EVENT_PREFIX = "pi-goal:event:";
-const GOAL_CONFIRM_TIMEOUT_MS = 10_000;
-// pi-goal publishes the active state before it delivers the kickoff prompt, so a delivery failure
-// arrives as a later error. Keep listening briefly so a rolled-back Goal is not reported as started.
-const GOAL_SETTLE_MS = 500;
-
-function positiveEnvMs(name, fallback) {
-  const configured = Number(process.env[name]);
-  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
-}
-
-function goalConfirmTimeoutMs() {
-  return positiveEnvMs(
-    "PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS",
-    GOAL_CONFIRM_TIMEOUT_MS,
-  );
-}
-
-function goalSettleMs() {
-  return positiveEnvMs("PROMPT_OPT_GOAL_SETTLE_MS", GOAL_SETTLE_MS);
-}
-
 // The command context owns the authoritative session identity; ambient env may be stale or unset.
 function currentSessionId(ctx) {
   try {
@@ -272,106 +248,6 @@ function currentSessionId(ctx) {
   } catch {
     return undefined;
   }
-}
-
-function parseGoalHandoff(output) {
-  let value;
-  try {
-    value = JSON.parse(output.trim());
-  } catch {
-    throw new Error("prompt-opt returned an unreadable goal handoff result");
-  }
-  if (
-    !value ||
-    value.status !== "handoff-written" ||
-    typeof value.handoff_path !== "string" ||
-    !value.handoff_path ||
-    typeof value.objective !== "string" ||
-    !value.objective
-  ) {
-    throw new Error("prompt-opt did not confirm a persisted goal handoff");
-  }
-  return value;
-}
-
-function describeGoalFailure({ code, message }) {
-  switch (code) {
-    case "GOAL_ALREADY_EXISTS":
-      return "a Goal already exists in this session and was left unchanged; run /goal clear before retrying";
-    case "RPC_DISABLED":
-      return "managed-run RPC is disabled; enable it in /goal → Settings";
-    case "NO_CONFIRMATION":
-      return "Goal activation unconfirmed.\nCheck /goal status before retrying.";
-    case "RPC_UNAVAILABLE":
-      return `the Goal event bus is unavailable (${message})`;
-    default:
-      return `${code}: ${message}`;
-  }
-}
-
-function activateGoal(pi, objective, debugLog) {
-  const events = pi.events;
-  if (!events?.on || !events?.emit)
-    return Promise.resolve({
-      ok: false,
-      code: "RPC_UNAVAILABLE",
-      message: "pi.events is missing",
-    });
-  const runId = `prompt-opt-${randomUUID()}`;
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearTimeout(settleTimer);
-      unsubscribe();
-      resolve(result);
-    };
-    const timer = setTimeout(
-      () =>
-        finish({
-          ok: false,
-          code: "NO_CONFIRMATION",
-          message: "no managed-run event arrived",
-        }),
-      goalConfirmTimeoutMs(),
-    );
-    let settleTimer;
-    let unsubscribe = () => {};
-    try {
-      unsubscribe = events.on(`${GOAL_EVENT_PREFIX}${runId}`, (event) => {
-        if (!event || event.runId !== runId) return;
-        if (event.type === "error" && event.operation === "start") {
-          finish({
-            ok: false,
-            code: event.error?.code ?? "RPC_ERROR",
-            message: event.error?.message ?? "unknown error",
-          });
-        } else if (event.type === "state" && event.status === "active") {
-          settleTimer ??= setTimeout(
-            () => finish({ ok: true, goalId: event.goalId }),
-            goalSettleMs(),
-          );
-        } else if (event.type === "state") {
-          finish({
-            ok: false,
-            code: "NOT_ACTIVE",
-            message: `Goal reported status ${event.status}`,
-          });
-        }
-      });
-    } catch (error) {
-      finish({ ok: false, code: "RPC_UNAVAILABLE", message: String(error) });
-      return;
-    }
-    debugLog?.("goal_start_emit", { runId });
-    try {
-      events.emit(GOAL_START_CHANNEL, { runId, objective });
-    } catch (error) {
-      finish({ ok: false, code: "RPC_UNAVAILABLE", message: String(error) });
-    }
-  });
 }
 
 export default function (pi) {
@@ -419,6 +295,7 @@ export default function (pi) {
       const goalMode = flags.includes("--goal");
       let goalSessionId;
       if (goalMode) {
+        ctx.ui.setEditorText("Goal handof");
         goalSessionId = currentSessionId(ctx);
         if (!goalSessionId) {
           ctx.ui.notify(
@@ -459,93 +336,33 @@ export default function (pi) {
           : "Optimizing with isolated Pi runner...",
         "info",
       );
-      debugLog?.("spawn_start", {
-        command: "prompt-opt",
-        flags: [...debugFlags, "-"],
-      });
+      if (!goalMode)
+        debugLog?.("spawn_start", {
+          command: "prompt-opt",
+          flags: [...debugFlags, "-"],
+        });
       try {
         const optimizerCwd =
           hasContext && typeof ctx.cwd === "string" && ctx.cwd
             ? ctx.cwd
             : process.cwd();
-        const optimized = await runOptimizer(
-          task,
-          cliFlags,
-          debugLog,
-          optimizerCwd,
-          goalMode
-            ? { ...process.env, PI_SESSION_ID: goalSessionId }
-            : undefined,
-        );
         if (goalMode) {
-          const handoff = parseGoalHandoff(optimized);
-          const authorityStart = handoff.objective.indexOf(
-            " The authoritative task specification is at: ",
-          );
-          const handoffInstructions =
-            authorityStart >= 0
-              ? handoff.objective.slice(authorityStart)
-              : ` The authoritative task specification is at: ${JSON.stringify(handoff.handoff_path)}. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
-          let objective = handoff.objective;
-          while (true) {
-            const preview =
-              `Goal preview:\n- Handoff file: ${handoff.handoff_path}\n- Goal: ${objective}`;
-            const choice = await ctx.ui.select(preview, [
-              "proceed",
-              "edit",
-              "cancel",
-            ]);
-            if (choice === "proceed") break;
-            if (choice !== "edit") {
-              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
-              return;
-            }
-            const edited = await ctx.ui.editor("Edit Goal", objective);
-            if (!edited?.trim()) {
-              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
-              return;
-            }
-            const editedSummary = edited
-              .trim()
-              .replace(handoffInstructions, "")
-              .trim();
-            if (!editedSummary) {
-              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
-              return;
-            }
-            objective = editedSummary + handoffInstructions;
-            if (objective.length > 4000) {
-              ctx.ui.notify(
-                "Edited Goal exceeds pi-goal's 4000-character limit; Goal not started.",
-                "error",
-              );
-              return;
-            }
-          }
-          if (currentSessionId(ctx) !== goalSessionId) {
-            ctx.ui.notify(
-              "Session changed during optimization; Goal not started.",
-              "error",
-            );
-            return;
-          }
-          const activation = await activateGoal(pi, objective, debugLog);
-          const status = activation.ok
-            ? `Goal started (goal ${activation.goalId})`
-            : activation.code === "NO_CONFIRMATION"
-              ? describeGoalFailure(activation)
-              : `Goal not started: ${describeGoalFailure(activation)}`;
-          debugLog?.("goal_activation", {
-            ok: activation.ok,
-            code: activation.code,
-            total_elapsed_ms: Date.now() - startedAt,
+          await runGoalFlow({
+            pi,
+            ctx,
+            task,
+            flags: cliFlags,
+            debugLog,
+            debugFlags,
+            startedAt,
+            cwd: optimizerCwd,
+            sessionId: goalSessionId,
+            runOptimizer,
+            currentSessionId,
           });
-          ctx.ui.notify(
-            `Goal handoff: ${handoff.handoff_path}; ${status}`,
-            activation.ok ? "info" : "error",
-          );
           return;
         }
+        const optimized = await runOptimizer(task, cliFlags, debugLog, optimizerCwd);
         ctx.ui.setEditorText(optimized);
         debugLog?.("complete", {
           output_chars: optimized.length,

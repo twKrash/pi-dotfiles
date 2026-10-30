@@ -54,7 +54,7 @@ if [ "${FAIL_PI:-0}" = 1 ]; then exit 1; fi
 call_count=$(wc -l <"$PI_CALLS" | tr -d " ")
 if [ "${GOAL_MODE:-0}" = 1 ]; then
   if [ -n "${GOAL_OUTPUT_FILE:-}" ]; then cat "$GOAL_OUTPUT_FILE"; else
-    printf '%s\n' '{"optimized_prompt":"Complete execution prompt\nwith all requirements.","goal_objective":"Implement the \"requested\" feature while preserving user'"'"'s stated constraints and C:\\tools paths."}'
+    printf '%s\n' '{"status":"ready","optimized_prompt":"Fallback task.","goal_objective":"Fallback task.","definition_of_done":["The requested behavior passes its regression test."]}'
   fi
 else
   printf 'optimized-%s\n' "$call_count"
@@ -66,6 +66,19 @@ cat >"${CLIP_CAPTURE:-/dev/null}"
 if [ "${FAIL_CLIPBOARD:-0}" = 1 ]; then exit 1; fi
 MOCK_XCLIP
 chmod +x "$TMP/mock-bin/pi" "$TMP/mock-bin/xclip"
+node - "$TMP/goal-default.json" "$TMP/expected-goal-prompt" <<'NODE'
+const fs = require("node:fs");
+const optimizedPrompt = "Complete execution prompt\nwith all requirements." + "x".repeat(4001);
+const definitionOfDone = ["The requested behavior passes its regression test."];
+const result = {
+  status: "ready",
+  optimized_prompt: optimizedPrompt,
+  goal_objective: "Implement the \"requested\" feature while preserving user's stated constraints and C:\\tools paths.",
+  definition_of_done: definitionOfDone,
+};
+fs.writeFileSync(process.argv[2], JSON.stringify(result));
+fs.writeFileSync(process.argv[3], `${optimizedPrompt}\n\nDefinition of Done:\n- ${definitionOfDone[0]}\n\nStop when every criterion is verified.`);
+NODE
 # --last settings loading must work without Bash 4's mapfile builtin.
 LAST_STATE="$TMP/last-settings-state/prompt-opt"
 mkdir -p "$LAST_STATE"
@@ -577,9 +590,8 @@ mkdir -p "$GOAL_HOME"
 GOAL_SESSION=01a17a4d-c236-7573-b7e3-60a763bbbec8
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
-  GOAL_MODE=1 GOAL_INPUT_CAPTURE="$TMP/goal-input" CLIP_CAPTURE="$TMP/goal-clip" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-default.json" GOAL_INPUT_CAPTURE="$TMP/goal-input" CLIP_CAPTURE="$TMP/goal-clip" \
   "$PROMPT_OPT" --goal --context 'inspect read-only sources' - >"$TMP/goal-output.json" 2>"$TMP/goal-output.err"
-printf 'Complete execution prompt\nwith all requirements.' >"$TMP/expected-goal-prompt"
 node - "$TMP/goal-output.json" "$TMP/expected-goal-objective.txt" "$GOAL_HOME/.pi/agent/handoffs/$GOAL_SESSION" <<'NODE'
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -588,8 +600,9 @@ const [sessionDir] = [process.argv[4]];
 assert.equal(parsed.status, "handoff-written");
 assert.ok(parsed.handoff_path.startsWith(`${sessionDir}/`), "handoff must live under the session directory");
 assert.ok(parsed.handoff_path.endsWith(".md"));
-const expected = `Implement the "requested" feature while preserving user's stated constraints and C:\\tools paths. The authoritative task specification is at: \`${parsed.handoff_path}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+const expected = `Implement the "requested" feature while preserving user's stated constraints and C:\\tools paths. Definition of Done: The requested behavior passes its regression test. Stop when every criterion is verified. The authoritative task specification is at: \`${parsed.handoff_path}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
 assert.equal(parsed.objective, expected);
+assert.deepEqual(parsed.definition_of_done, ["The requested behavior passes its regression test."]);
 assert.ok(parsed.objective.length <= 4000);
 fs.writeFileSync(process.argv[3], parsed.handoff_path);
 NODE
@@ -603,8 +616,9 @@ cmp "$GOAL_HANDOFF" "$TMP/expected-goal-prompt"
 ! grep -Fq 'Complete execution prompt' "$TMP/goal-output.json"
 test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 1
 test ! -e "$TMP/goal-state/prompt-opt"
-grep -q 'OPT-IN GOAL HANDOFF OUTPUT CONTRACT' "$TMP/goal-input"
+grep -q 'OPT-IN GOAL OUTPUT CONTRACT' "$TMP/goal-input"
 grep -q '"goal_objective"' "$TMP/goal-input"
+grep -q '"definition_of_done"' "$TMP/goal-input"
 ! grep -q '"objective_summary"' "$TMP/goal-input"
 grep -qi 'do not execute the task' "$TMP/goal-input"
 grep -q 'CONTEXT REQUEST:' "$TMP/goal-input"
@@ -617,7 +631,7 @@ test "$(node -e 'console.log((require("node:fs").statSync(process.argv[1]).mode 
 # A second run must retain the first handoff and use a distinct path.
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
-  GOAL_MODE=1 CLIP_CAPTURE="$TMP/goal-clip" "$PROMPT_OPT" --goal - >"$TMP/goal-output-2.json"
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-default.json" CLIP_CAPTURE="$TMP/goal-clip" "$PROMPT_OPT" --goal - >"$TMP/goal-output-2.json"
 GOAL_HANDOFF_2=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).handoff_path)' "$TMP/goal-output-2.json")
 test "$GOAL_HANDOFF" != "$GOAL_HANDOFF_2"
 cmp "$GOAL_HANDOFF" "$TMP/expected-goal-prompt"
@@ -625,7 +639,7 @@ test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 2
 # Clipboard problems cannot block a persisted handoff, because goal mode does not use the clipboard.
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
-  GOAL_MODE=1 CLIP_CAPTURE="$TMP/goal-clip" FAIL_CLIPBOARD=1 "$PROMPT_OPT" --goal - >"$TMP/goal-clipboard-failure.json"
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-default.json" CLIP_CAPTURE="$TMP/goal-clip" FAIL_CLIPBOARD=1 "$PROMPT_OPT" --goal - >"$TMP/goal-clipboard-failure.json"
 node -e 'const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (v.status !== "handoff-written") process.exit(1)' "$TMP/goal-clipboard-failure.json"
 test "$(wc -l <"$TMP/goal-calls" | tr -d ' ')" -eq 3
 # Missing session identity must fail without printing a handoff result.
@@ -640,7 +654,7 @@ mkdir -p "$GOAL_BROKEN_HOME/.pi/agent" "$TMP/elsewhere"
 ln -s "$TMP/elsewhere" "$GOAL_BROKEN_HOME/.pi/agent/handoffs"
 if printf 'original task\n' | env HOME="$GOAL_BROKEN_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" \
-  GOAL_MODE=1 "$PROMPT_OPT" --goal - >"$TMP/goal-fs-failure.out" 2>"$TMP/goal-fs-failure.err"; then
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-default.json" "$PROMPT_OPT" --goal - >"$TMP/goal-fs-failure.out" 2>"$TMP/goal-fs-failure.err"; then
   echo 'goal mode followed a handoff-directory symlink' >&2; exit 1
 fi
 grep -q 'unsafe handoff directory' "$TMP/goal-fs-failure.err"
@@ -654,24 +668,24 @@ done
 cp "$TMP/mock-bin/pi" "$GOAL_MIN_BIN/pi"
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$GOAL_MIN_BIN" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
-  "$PROMPT_OPT" --goal - >"$TMP/goal-no-clipboard.json" 2>"$TMP/goal-no-clipboard.err"
+  GOAL_OUTPUT_FILE="$TMP/goal-default.json" "$PROMPT_OPT" --goal - >"$TMP/goal-no-clipboard.json" 2>"$TMP/goal-no-clipboard.err"
 node -e 'const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (v.status !== "handoff-written") process.exit(1)' "$TMP/goal-no-clipboard.json"
 ! grep -q 'xclip\|pbcopy' "$TMP/goal-no-clipboard.err"
 # Pi session ids are path-safe ids, not necessarily UUIDs.
 GOAL_NAMED_SESSION='my_session.1'
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_NAMED_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
-  "$PROMPT_OPT" --goal - >"$TMP/goal-named-session.json"
+  GOAL_OUTPUT_FILE="$TMP/goal-default.json" "$PROMPT_OPT" --goal - >"$TMP/goal-named-session.json"
 node -e '
 const v = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 if (!v.handoff_path.includes(process.argv[2])) process.exit(1);
 ' "$TMP/goal-named-session.json" "/$GOAL_NAMED_SESSION/"
-# A fenced JSON answer is still a usable handoff.
-printf '```json\n{"optimized_prompt":"fenced prompt","goal_objective":"fenced objective"}\n```\n' >"$TMP/goal-fenced.json"
+# A fenced JSON answer is still a usable Goal result.
+printf '```json\n{"status":"ready","optimized_prompt":"fenced prompt","goal_objective":"fenced objective","definition_of_done":["The result is verified."]}\n```\n' >"$TMP/goal-fenced.json"
 printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
   GOAL_OUTPUT_FILE="$TMP/goal-fenced.json" "$PROMPT_OPT" --goal - >"$TMP/goal-fenced.out"
-grep -q '"status":"handoff-written"' "$TMP/goal-fenced.out"
+grep -q '"status":"inline"' "$TMP/goal-fenced.out"
 # A malformed optimizer envelope must preserve the raw answer for recovery.
 printf 'Here is the result:\n{"optimized_prompt":"recoverable prompt","goal_objective":"recoverable objective"}\n' >"$TMP/goal-chatty.json"
 if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
@@ -683,7 +697,7 @@ grep -Fq 'Here is the result:' "$TMP/goal-chatty.err"
 grep -Fq '"optimized_prompt":"recoverable prompt"' "$TMP/goal-chatty.err"
 test ! -s "$TMP/goal-chatty.out"
 # Reject objectives that exceed pi-goal's documented limit.
-node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({optimized_prompt:"prompt",goal_objective:"x".repeat(4000)}))' "$TMP/goal-too-long.json"
+node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({status:"ready",optimized_prompt:"p".repeat(4001),goal_objective:"x".repeat(4000),definition_of_done:["The result is verified."]}))' "$TMP/goal-too-long.json"
 if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
   XDG_STATE_HOME="$TMP/goal-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-calls" GOAL_MODE=1 \
   GOAL_OUTPUT_FILE="$TMP/goal-too-long.json" "$PROMPT_OPT" --goal - >"$TMP/goal-too-long.out" 2>"$TMP/goal-too-long.err"; then
@@ -691,6 +705,133 @@ if printf 'original task\n' | env HOME="$GOAL_HOME" PI_SESSION_ID="$GOAL_SESSION
 fi
 grep -q '4000-character limit' "$TMP/goal-too-long.err"
 test ! -s "$TMP/goal-too-long.out"
+
+# Short complete tasks stay inline, while only oversized tasks get a handoff.
+node - "$TMP/goal-inline.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  status: "ready",
+  optimized_prompt: "Implement the requested feature.",
+  goal_objective: "Implement the requested feature.",
+  definition_of_done: ["The result is verified."],
+}));
+NODE
+INLINE_HOME="$TMP/goal-inline-home"
+mkdir -p "$INLINE_HOME"
+printf 'short task\n' | env HOME="$INLINE_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-inline-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-inline-calls" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-inline.json" "$PROMPT_OPT" --goal - >"$TMP/goal-inline.out"
+node - "$TMP/goal-inline.out" "$INLINE_HOME" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const result = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const expected = "Implement the requested feature.\n\nDefinition of Done:\n- The result is verified.\n\nStop when every criterion is verified.";
+assert.equal(result.status, "inline");
+assert.equal(result.objective, expected);
+assert.deepEqual(result.definition_of_done, ["The result is verified."]);
+assert.equal(fs.existsSync(path.join(process.argv[3], ".pi")), false, "inline result must not create a handoff");
+NODE
+# The exact limit remains inline; one additional character creates a handoff.
+node - "$TMP/goal-boundary.json" "$TMP/goal-over-boundary.json" <<'NODE'
+const fs = require("node:fs");
+const suffix = "\n\nDefinition of Done:\n- The result is verified.\n\nStop when every criterion is verified.";
+const base = { status: "ready", goal_objective: "Implement the requested feature.", definition_of_done: ["The result is verified."] };
+fs.writeFileSync(process.argv[2], JSON.stringify({ ...base, optimized_prompt: "x".repeat(4000 - suffix.length) }));
+fs.writeFileSync(process.argv[3], JSON.stringify({ ...base, optimized_prompt: "x".repeat(4001 - suffix.length) }));
+NODE
+BOUNDARY_HOME="$TMP/goal-boundary-home"
+mkdir -p "$BOUNDARY_HOME"
+printf 'boundary task\n' | env HOME="$BOUNDARY_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-boundary-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-boundary-calls" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-boundary.json" "$PROMPT_OPT" --goal - >"$TMP/goal-boundary.out"
+node - "$TMP/goal-boundary.out" "$BOUNDARY_HOME" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const result = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(result.status, "inline");
+assert.equal(result.objective.length, 4000);
+assert.equal(fs.existsSync(path.join(process.argv[3], ".pi")), false);
+NODE
+OVER_HOME="$TMP/goal-over-home"
+mkdir -p "$OVER_HOME"
+printf 'oversized task\n' | env HOME="$OVER_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-over-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-over-calls" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-over-boundary.json" "$PROMPT_OPT" --goal - >"$TMP/goal-over-boundary.out"
+node - "$TMP/goal-over-boundary.out" "$OVER_HOME" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const result = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(result.status, "handoff-written");
+assert.equal(result.objective.length <= 4000, true);
+assert.match(result.objective, /Definition of Done: The result is verified\./);
+assert.ok(result.objective.includes(result.handoff_path));
+assert.equal(fs.readFileSync(result.handoff_path, "utf8").length, 4001);
+assert.equal(fs.existsSync(path.join(process.argv[3], ".pi")), true);
+NODE
+# A ready result without acceptance criteria is rejected without creating a handoff.
+node - "$TMP/goal-missing-dod.json" <<'NODE'
+require("node:fs").writeFileSync(process.argv[2], JSON.stringify({
+  status: "ready", optimized_prompt: "Incomplete task.", goal_objective: "Incomplete task.",
+}));
+NODE
+MISSING_DOD_HOME="$TMP/goal-missing-dod-home"
+mkdir -p "$MISSING_DOD_HOME"
+if printf 'task\n' | env HOME="$MISSING_DOD_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-missing-dod-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-missing-dod-calls" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-missing-dod.json" "$PROMPT_OPT" --goal - >"$TMP/goal-missing-dod.out" 2>"$TMP/goal-missing-dod.err"; then
+  echo 'goal mode accepted a result without a Definition of Done' >&2; exit 1
+fi
+grep -qi 'definition_of_done' "$TMP/goal-missing-dod.err"
+test ! -s "$TMP/goal-missing-dod.out"
+test ! -e "$MISSING_DOD_HOME/.pi"
+# An unresolved request asks for clarification, without persisting or starting a Goal.
+node - "$TMP/goal-clarification.json" <<'NODE'
+require("node:fs").writeFileSync(process.argv[2], JSON.stringify({
+  status: "needs_clarification", question: "Which output should be authoritative?",
+}));
+NODE
+CLARIFICATION_HOME="$TMP/goal-clarification-home"
+mkdir -p "$CLARIFICATION_HOME"
+printf 'unclear task\n' | env HOME="$CLARIFICATION_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+  XDG_STATE_HOME="$TMP/goal-clarification-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-clarification-calls" \
+  GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-clarification.json" "$PROMPT_OPT" --goal - >"$TMP/goal-clarification.out"
+node - "$TMP/goal-clarification.out" "$CLARIFICATION_HOME" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const result = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.deepEqual(result, { status: "needs-clarification", question: "Which output should be authoritative?" });
+assert.equal(fs.existsSync(path.join(process.argv[3], ".pi")), false);
+NODE
+# Omission markers in any optimizer-generated field fail closed before filesystem writes.
+for marker_field in optimized_prompt goal_objective definition_of_done question; do
+  node - "$TMP/goal-marker-$marker_field.json" "$marker_field" <<'NODE'
+const fs = require("node:fs");
+const [file, field] = process.argv.slice(2);
+const marker = "[… 4 chunks omitted …]";
+const result = { status: "ready", optimized_prompt: "Complete task.", goal_objective: "Complete task.", definition_of_done: ["The result is verified."] };
+if (field === "question") {
+  result.status = "needs_clarification";
+  result.question = marker;
+} else if (field === "definition_of_done") result.definition_of_done = [marker];
+else result[field] = marker;
+fs.writeFileSync(file, JSON.stringify(result));
+NODE
+  MARKER_HOME="$TMP/goal-marker-$marker_field-home"
+  mkdir -p "$MARKER_HOME"
+  if printf 'task\n' | env HOME="$MARKER_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
+    XDG_STATE_HOME="$TMP/goal-marker-$marker_field-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-marker-$marker_field-calls" \
+    GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-marker-$marker_field.json" "$PROMPT_OPT" --goal - \
+    >"$TMP/goal-marker-$marker_field.out" 2>"$TMP/goal-marker-$marker_field.err"; then
+    echo "goal mode accepted an omission marker in $marker_field" >&2; exit 1
+  fi
+  grep -qi 'omission marker' "$TMP/goal-marker-$marker_field.err"
+  test ! -s "$TMP/goal-marker-$marker_field.out"
+  test ! -e "$MARKER_HOME/.pi"
+done
 
 node "$ROOT/tests/prompt-opt-extension.mjs"
 printf 'prompt-opt tests passed\n'
