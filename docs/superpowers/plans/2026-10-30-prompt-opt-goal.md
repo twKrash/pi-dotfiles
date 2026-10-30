@@ -4,7 +4,7 @@
 
 **Goal:** Inline complete Goal tasks up to pi-goal's 4,000-character limit, safely hand off longer tasks, and require a clear DoD before activation.
 
-**Architecture:** The prompt-opt CLI validates a structured optimizer result, rejects omission markers, leaves only the exact `Goal handof` label in the main editor, and returns either an inline Goal objective, a handoff-backed objective, or a clarification question. The Pi extension handles clarification, previews and edits the complete authority, and starts a Goal only after validation and user approval. Its extension editor exposes Pi's configured external editor (`$VISUAL`/`$EDITOR`) for edits.
+**Architecture:** The prompt-opt CLI validates a structured optimizer result, rejects omission markers, never writes the main prompt editor, and returns either an inline Goal objective, a handoff-backed objective, or a clarification question. The Pi extension handles clarification, previews and edits the complete authority, and starts a Goal only after validation and user approval. Its extension editor exposes Pi's configured external editor (`$VISUAL`/`$EDITOR`) for edits.
 
 **Tech Stack:** Bash CLI with embedded Node.js validation; JavaScript Pi extension; Node test harnesses.
 
@@ -16,7 +16,7 @@
 - Do not create a handoff unless the complete optimized task plus DoD exceeds the limit.
 - Never activate a Goal from malformed output, omission-marked task data, or unresolved clarification.
 - Every ready Goal must carry observable acceptance criteria and a stop condition.
-- In Goal mode, put only the exact label `Goal handof` in the main prompt editor; never put the task or goal value there.
+- In Goal mode, never write the main prompt editor: leave it clean and untouched, with no label, task, objective, or goal value.
 - Do not add dependencies or modify pi-goal itself.
 
 ## Review Focus
@@ -57,7 +57,7 @@
 - Consumes: the three CLI result statuses from Task 1.
 - Produces: a preview with a first handoff-status/path bullet, a DoD-bearing objective, clarification and edit loops that rerun optimization, and one activation only after Proceed.
 
-- [x] Write failing extension tests for the exact editor label, inline versus handoff parsing/preview, clarification answer/cancel, invalid result rejection, direct edits, and long-task edits that generate a new authoritative handoff.
+- [x] Write failing extension tests for the untouched editor, inline versus handoff parsing/preview, clarification answer/cancel, invalid result rejection, direct edits, and long-task edits that generate a new authoritative handoff.
 - [x] Run `node tests/prompt-opt-extension.mjs` and confirm the new cases fail against the handoff-only parser and objective-only edit flow.
 - [x] Implement result-status handling and modal clarification/edit behavior. For long tasks, read the current handoff as edit prefill, re-run prompt-opt with edited full text, and preview the returned new handoff.
 - [x] Run `node tests/prompt-opt-extension.mjs` and confirm all extension tests pass.

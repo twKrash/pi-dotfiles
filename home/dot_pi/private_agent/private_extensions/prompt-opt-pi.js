@@ -295,7 +295,7 @@ export default function (pi) {
       const goalMode = flags.includes("--goal");
       let goalSessionId;
       if (goalMode) {
-        ctx.ui.setEditorText("Goal handof");
+        // Goal mode never writes the main prompt editor; it stays exactly as the user left it.
         goalSessionId = currentSessionId(ctx);
         if (!goalSessionId) {
           ctx.ui.notify(

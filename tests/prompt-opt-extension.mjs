@@ -108,6 +108,7 @@ try {
   const entries = [];
   const notifications = [];
   let editorText = "";
+  let editorWrites = 0;
   let taskText = "sample task";
   let goalChoices = ["proceed"];
   let editedGoal = "Edited complete task";
@@ -191,11 +192,14 @@ try {
         notifications.push(message);
       },
       setEditorText(value) {
+        editorWrites += 1;
         editorText = value;
       },
     },
   };
 
+  let editorBeforeGoal;
+  let editorWritesBeforeGoal;
   editorText = "keep editor draft";
   await handler("--help", ctx);
   assert.equal(editorText, "keep editor draft");
@@ -256,6 +260,8 @@ try {
     goalId: "goal-1",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler(`--goal --context '${context}'`, ctx);
   const goalArgs = await readFile(argsFile, "utf8");
   assert.equal(
@@ -275,7 +281,11 @@ try {
     true,
     "the run channel must be subscribed before the start request",
   );
-  assert.equal(editorText, "Goal handof", "the main editor receives only the exact Goal label");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   const preview = goalPreviews.at(-1);
   assert.deepEqual(preview.options, ["proceed", "edit", "cancel"]);
   assert.ok(
@@ -309,6 +319,8 @@ try {
     status: "active",
   }));
   goalChoices = ["proceed"];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits[0]?.data.objective, inlineGoalResult.objective);
   assert.ok(
@@ -318,7 +330,11 @@ try {
     "inline preview must state that no handoff was written",
   );
   assert.ok(goalPreviews.at(-1).title.includes("- Goal: " + inlineGoalResult.objective));
-  assert.equal(editorText, "Goal handof", "inline Goal leaves only the label in the main editor");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
 
   // Editing a handoff-backed task edits the authority and creates a new handoff.
@@ -355,6 +371,8 @@ try {
     goalId: "goal-edited",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   const editCall = goalEditorCalls.filter(({ title }) => title === "Edit Goal Task").at(-1);
   assert.equal(editCall.prefill, goalFullPrompt, "handoff edit opens the complete authoritative task");
@@ -363,7 +381,11 @@ try {
   assert.ok(bus.emits[0].data.objective.includes(editedHandoffPath));
   assert.ok(!bus.emits[0].data.objective.includes(goalHandoffPath));
   assert.equal(await readFile(editedHandoffPath, "utf8"), editedTask);
-  assert.equal(editorText, "Goal handof", "edited Goal leaves only the label in the main editor");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(
     goalPreviews.at(-1).title.startsWith(`Goal preview:\n- Handoff file: ${editedHandoffPath}\n`),
     "edited preview must use the replacement authority first",
@@ -388,6 +410,8 @@ try {
     goalId: "goal-inline-edited",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   const inlineEditCall = goalEditorCalls.filter(({ title }) => title === "Edit Goal Task").at(-1);
   assert.equal(inlineEditCall.prefill, inlineGoalResult.objective);
@@ -418,13 +442,19 @@ try {
     goalId: "goal-clarified",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits[0].data.objective, clarificationReady.objective);
   assert.ok(goalPreviews.at(-1).title.includes(clarificationReady.objective));
   assert.equal(goalPreviews.length, previewsBeforeClarification + 1);
   assert.ok(notifications.includes(clarificationQuestion));
   assert.ok((await readFile(goalInputFile, "utf8")).includes(clarificationAnswer));
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
 
   // Cancelling clarification prevents preview and activation.
@@ -435,23 +465,37 @@ try {
   });
   clarificationAnswer = "";
   const previewsBeforeCancel = goalPreviews.length;
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
   assert.equal(goalPreviews.length, previewsBeforeCancel);
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
 
   // Cancelling the preview never starts a Goal.
   bus.reset();
   goalChoices = ["cancel"];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
-  assert.equal(editorText, "Goal handof", "cancelled Goal leaves only the label in the main editor");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   goalChoices = ["proceed"];
 
   // Dismissing the preview never activates a Goal.
   bus.reset();
   goalChoices = [undefined];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
 
@@ -459,11 +503,15 @@ try {
   bus.reset();
   goalChoices = ["edit"];
   editedGoal = "";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
   bus.reset();
   goalChoices = ["edit", "cancel"];
   editedGoal = "Edited goal";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
 
@@ -475,9 +523,15 @@ try {
     operation: "start",
     error: { code: "GOAL_ALREADY_EXISTS", message: "A Goal already exists." },
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 1);
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(notifications.some((message) => /already exists/.test(message)));
 
   // RPC disabled is an honest failure, not a silent success.
@@ -488,16 +542,28 @@ try {
     operation: "start",
     error: { code: "RPC_DISABLED", message: "Managed run RPC is disabled." },
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(notifications.some((message) => /RPC is disabled/.test(message)));
 
   // No activation event must never be reported as a started Goal.
   bus.reset();
   process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS = "50";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(
     notifications.some((message) =>
       /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./.test(
@@ -505,7 +571,11 @@ try {
       ),
     ),
   );
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
 
   // If the session switches while the optimizer runs, do not activate in the new session.
   bus.reset();
@@ -516,6 +586,8 @@ try {
     activeSessionId = "session-switched-during-optimization";
     return task;
   };
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   ctx.ui.editor = editor;
   activeSessionId = sessionBeforeOptimization;
@@ -540,6 +612,8 @@ try {
   bus.reset();
   process.env.PROMPT_OPT_TEST_FAIL = "1";
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_TEST_FAIL;
   assert.equal(
@@ -550,7 +624,11 @@ try {
   assert.ok(
     notifications.some((message) => /Prompt optimization failed/.test(message)),
   );
-  assert.equal(editorText, "Goal handof", "Goal failure leaves only the label in the main editor");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
 
   // A runtime without the event bus must fail honestly instead of claiming a Goal.
   let buslessHandler;
@@ -572,6 +650,8 @@ try {
   bus.reset();
   const validResult = process.env.PROMPT_OPT_TEST_GOAL_RESULT;
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = "not a handoff";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = validResult;
   assert.equal(bus.emits.length, 0, "an unconfirmed handoff must not emit");
@@ -585,6 +665,8 @@ try {
     objective: "x".repeat(4001),
     definition_of_done: ["The criterion is verified"],
   });
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0, "oversized result must not start a Goal");
   assert.ok(notifications.some((message) => /4000-character limit/i.test(message)));
@@ -604,8 +686,14 @@ try {
     },
   ]);
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(
     notifications.some((message) =>
       /SUPERSEDED: The managed Goal was superseded/.test(message),
@@ -620,19 +708,31 @@ try {
     goalId: "goal-3",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   const secondRunId = bus.emits[0]?.data.runId;
   assert.ok(
     secondRunId && secondRunId !== firstRunId,
     "each run uses a fresh runId",
   );
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
 
   const argsBeforeMissingSession = await readFile(argsFile, "utf8");
   activeSessionId = undefined;
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.equal(editorText, "Goal handof");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.equal(
     await readFile(argsFile, "utf8"),
     argsBeforeMissingSession,
