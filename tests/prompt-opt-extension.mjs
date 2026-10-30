@@ -7,6 +7,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -37,7 +38,7 @@ await writeFile(
 printf '%s\n' "$@" > "$PROMPT_OPT_TEST_ARGS"
 printf '%s' "${"${PI_SESSION_ID:-}"}" > "$PROMPT_OPT_TEST_SESSION_ID"
 pwd -P > "$PROMPT_OPT_TEST_CWD"
-cat >/dev/null
+cat > "$PROMPT_OPT_TEST_INPUT"
 if [ "\${1:-}" = --help ] || [ "\${1:-}" = -h ]; then
   printf 'prompt-opt usage\n'
   exit 0
@@ -60,6 +61,8 @@ const oldArgsFile = process.env.PROMPT_OPT_TEST_ARGS;
 const oldCwdFile = process.env.PROMPT_OPT_TEST_CWD;
 const oldSessionIdFile = process.env.PROMPT_OPT_TEST_SESSION_ID;
 const oldPiSessionId = process.env.PI_SESSION_ID;
+const oldHome = process.env.HOME;
+const oldGoalInput = process.env.PROMPT_OPT_TEST_INPUT;
 const oldGoalResult = process.env.PROMPT_OPT_TEST_GOAL_RESULT;
 const oldGoalTimeout = process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
 const oldGoalSettle = process.env.PROMPT_OPT_GOAL_SETTLE_MS;
@@ -68,21 +71,53 @@ process.env.PROMPT_OPT_TEST_ARGS = argsFile;
 process.env.PROMPT_OPT_TEST_CWD = cwdFile;
 process.env.PROMPT_OPT_TEST_SESSION_ID = sessionIdFile;
 process.env.PROMPT_OPT_GOAL_SETTLE_MS = "10";
+const testHome = path.join(temp, "home");
+const goalSessionId = "01a17a4d-c236-7573-b7e3-60a763bbbec8";
+const goalInputFile = path.join(temp, "optimizer-input.txt");
+process.env.HOME = testHome;
+process.env.PROMPT_OPT_TEST_INPUT = goalInputFile;
+const goalHandoffPath = path.join(
+  testHome,
+  ".pi",
+  "agent",
+  "handoffs",
+  goalSessionId,
+  "goal-1.md",
+);
+const goalDefinitionOfDone = ["The importer preserves its existing error contract"];
+const goalFullPrompt =
+  "Rewrite the importer and preserve its existing error contract.\n\n" +
+  "Definition of Done:\n- The importer preserves its existing error contract\n\n" +
+  "Stop when every criterion is verified.";
 const goalObjective =
-  "Complete this task: rewrite the importer and keep its error contract.";
-process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
+  "Complete this task: rewrite the importer and keep its error contract. " +
+  "Definition of Done: The importer preserves its existing error contract. " +
+  "Stop when every criterion is verified." +
+  ` The authoritative task specification is at: \`${goalHandoffPath}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+await mkdir(path.dirname(goalHandoffPath), { recursive: true });
+await writeFile(goalHandoffPath, goalFullPrompt);
+const initialGoalResult = {
   status: "handoff-written",
-  handoff_path: path.join(temp, "handoffs", "session-a", "goal-1.md"),
+  handoff_path: goalHandoffPath,
   objective: goalObjective,
-});
+  definition_of_done: goalDefinitionOfDone,
+};
+process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
 
 try {
   let handler;
   const entries = [];
   const notifications = [];
   let editorText = "";
+  let editorWrites = 0;
   let taskText = "sample task";
-  let activeSessionId = "01a17a4d-c236-7573-b7e3-60a763bbbec8";
+  let goalChoices = ["proceed"];
+  let editedGoal = "Edited complete task";
+  let clarificationAnswer = "";
+  let nextGoalResult;
+  const goalPreviews = [];
+  const goalEditorCalls = [];
+  let activeSessionId = goalSessionId;
   const bus = createEventBus();
   promptOptExtension({
     events: bus.api,
@@ -139,18 +174,33 @@ try {
     },
     cwd: contextWorkspace,
     ui: {
-      async editor() {
+      async editor(title, prefill) {
+        goalEditorCalls.push({ title, prefill });
+        if (title === "Edit Goal Task" || title === "Answer Goal clarification") {
+          if (nextGoalResult) {
+            process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(nextGoalResult);
+            nextGoalResult = undefined;
+          }
+          return title === "Edit Goal Task" ? editedGoal : clarificationAnswer;
+        }
         return taskText;
+      },
+      async select(title, options) {
+        goalPreviews.push({ title, options });
+        return goalChoices.length ? goalChoices.shift() : "proceed";
       },
       notify(message) {
         notifications.push(message);
       },
       setEditorText(value) {
+        editorWrites += 1;
         editorText = value;
       },
     },
   };
 
+  let editorBeforeGoal;
+  let editorWritesBeforeGoal;
   editorText = "keep editor draft";
   await handler("--help", ctx);
   assert.equal(editorText, "keep editor draft");
@@ -211,6 +261,8 @@ try {
     goalId: "goal-1",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler(`--goal --context '${context}'`, ctx);
   const goalArgs = await readFile(argsFile, "utf8");
   assert.equal(
@@ -230,15 +282,20 @@ try {
     true,
     "the run channel must be subscribed before the start request",
   );
-  assert.match(editorText, /Goal handoff: /);
-  assert.ok(
-    editorText.includes(path.join(temp, "handoffs", "session-a", "goal-1.md")),
-    "the handoff location is reported",
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
   );
+  const preview = goalPreviews.at(-1);
+  assert.deepEqual(preview.options, ["proceed", "edit", "cancel"]);
   assert.ok(
-    !editorText.includes(goalObjective),
-    "the prompt itself is not re-printed",
+    preview.title.startsWith(
+      `Goal preview:\n- Handoff file: ${goalHandoffPath}\n`,
+    ),
+    "the handoff location is the first preview bullet",
   );
+  assert.ok(preview.title.includes("- Goal: " + goalObjective));
   assert.ok(
     notifications.some((message) =>
       /Goal started \(goal goal-1\)/.test(message),
@@ -246,6 +303,218 @@ try {
     "activation requires the managed-run confirmation",
   );
   assert.ok(!notifications.some((message) => /Goal not started/.test(message)));
+
+  // A complete task that fits the limit is previewed and activated inline.
+  bus.reset();
+  const inlineGoalResult = {
+    status: "inline",
+    objective:
+      "Implement the small feature.\n\nDefinition of Done:\n- The regression test passes\n\nStop when every criterion is verified.",
+    definition_of_done: ["The regression test passes"],
+  };
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(inlineGoalResult);
+  bus.respondOnStart(({ runId }) => ({
+    type: "state",
+    runId,
+    goalId: "goal-inline",
+    status: "active",
+  }));
+  goalChoices = ["proceed"];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits[0]?.data.objective, inlineGoalResult.objective);
+  assert.ok(
+    goalPreviews.at(-1).title.startsWith(
+      "Goal preview:\n- Handoff file: not needed",
+    ),
+    "inline preview must state that no handoff was written",
+  );
+  assert.ok(goalPreviews.at(-1).title.includes("- Goal: " + inlineGoalResult.objective));
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Editing a handoff-backed task edits the authority and creates a new handoff.
+  bus.reset();
+  const editedHandoffPath = path.join(
+    testHome,
+    ".pi",
+    "agent",
+    "handoffs",
+    goalSessionId,
+    "goal-2.md",
+  );
+  const editedTask =
+    "Rewrite the importer and preserve the updated error contract.\n\n" +
+    "Definition of Done:\n- The updated importer contract is verified\n\n" +
+    "Stop when every criterion is verified.";
+  const editedDefinitionOfDone = ["The updated importer contract is verified"];
+  const editedObjective =
+    "Update the importer safely. Definition of Done: The updated importer contract is verified. " +
+    "Stop when every criterion is verified." +
+    ` The authoritative task specification is at: \`${editedHandoffPath}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+  await writeFile(editedHandoffPath, editedTask);
+  nextGoalResult = {
+    status: "handoff-written",
+    handoff_path: editedHandoffPath,
+    objective: editedObjective,
+    definition_of_done: editedDefinitionOfDone,
+  };
+  goalChoices = ["edit", "proceed"];
+  editedGoal = "Rework the importer with the updated contract.";
+  bus.respondOnStart(({ runId }) => ({
+    type: "state",
+    runId,
+    goalId: "goal-edited",
+    status: "active",
+  }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  const editCall = goalEditorCalls.filter(({ title }) => title === "Edit Goal Task").at(-1);
+  assert.equal(editCall.prefill, goalFullPrompt, "handoff edit opens the complete authoritative task");
+  assert.equal(await readFile(goalInputFile, "utf8"), editedGoal, "edited full task is re-optimized");
+  assert.equal(bus.emits[0].data.objective, editedObjective);
+  assert.ok(bus.emits[0].data.objective.includes(editedHandoffPath));
+  assert.ok(!bus.emits[0].data.objective.includes(goalHandoffPath));
+  assert.equal(await readFile(editedHandoffPath, "utf8"), editedTask);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  assert.ok(
+    goalPreviews.at(-1).title.startsWith(`Goal preview:\n- Handoff file: ${editedHandoffPath}\n`),
+    "edited preview must use the replacement authority first",
+  );
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Editing an inline task also re-optimizes the complete edited task.
+  bus.reset();
+  const editedInlineTask = "Tighten the feature behavior and retain the explicit acceptance test.";
+  const editedInlineResult = {
+    status: "inline",
+    objective: "Tightened feature behavior.\n\nDefinition of Done:\n- The explicit acceptance test passes\n\nStop when every criterion is verified.",
+    definition_of_done: ["The explicit acceptance test passes"],
+  };
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(inlineGoalResult);
+  nextGoalResult = editedInlineResult;
+  goalChoices = ["edit", "proceed"];
+  editedGoal = editedInlineTask;
+  bus.respondOnStart(({ runId }) => ({
+    type: "state",
+    runId,
+    goalId: "goal-inline-edited",
+    status: "active",
+  }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  const inlineEditCall = goalEditorCalls.filter(({ title }) => title === "Edit Goal Task").at(-1);
+  assert.equal(inlineEditCall.prefill, inlineGoalResult.objective);
+  assert.equal(await readFile(goalInputFile, "utf8"), editedInlineTask);
+  assert.equal(bus.emits[0].data.objective, editedInlineResult.objective);
+  assert.ok(goalPreviews.at(-1).title.startsWith("Goal preview:\n- Handoff file: not needed"));
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Clarification is answered before preview and the answer reaches the optimizer.
+  bus.reset();
+  const clarificationQuestion = "Which importer error contract must remain stable?";
+  const clarificationReady = {
+    status: "inline",
+    objective: "Preserve the selected importer error contract.\n\nDefinition of Done:\n- The selected error contract passes its regression tests\n\nStop when every criterion is verified.",
+    definition_of_done: ["The selected error contract passes its regression tests"],
+  };
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
+    status: "needs-clarification",
+    question: clarificationQuestion,
+  });
+  nextGoalResult = clarificationReady;
+  clarificationAnswer = "Keep the existing error shape and message.";
+  const previewsBeforeClarification = goalPreviews.length;
+  goalChoices = ["proceed"];
+  bus.respondOnStart(({ runId }) => ({
+    type: "state",
+    runId,
+    goalId: "goal-clarified",
+    status: "active",
+  }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits[0].data.objective, clarificationReady.objective);
+  assert.ok(goalPreviews.at(-1).title.includes(clarificationReady.objective));
+  assert.equal(goalPreviews.length, previewsBeforeClarification + 1);
+  assert.ok(notifications.includes(clarificationQuestion));
+  assert.ok((await readFile(goalInputFile, "utf8")).includes(clarificationAnswer));
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Cancelling clarification prevents preview and activation.
+  bus.reset();
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
+    status: "needs-clarification",
+    question: clarificationQuestion,
+  });
+  clarificationAnswer = "";
+  const previewsBeforeCancel = goalPreviews.length;
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  assert.equal(goalPreviews.length, previewsBeforeCancel);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Cancelling the preview never starts a Goal.
+  bus.reset();
+  goalChoices = ["cancel"];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  goalChoices = ["proceed"];
+
+  // Dismissing the preview never activates a Goal.
+  bus.reset();
+  goalChoices = [undefined];
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+
+  // Cancelling the editor or the follow-up preview also prevents activation.
+  bus.reset();
+  goalChoices = ["edit"];
+  editedGoal = "";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  bus.reset();
+  goalChoices = ["edit", "cancel"];
+  editedGoal = "Edited goal";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
 
   // An existing Goal is reported, never replaced: one emit, no second request.
   bus.reset();
@@ -255,11 +524,14 @@ try {
     operation: "start",
     error: { code: "GOAL_ALREADY_EXISTS", message: "A Goal already exists." },
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 1);
-  assert.match(
-    editorText,
-    /Goal not started: a Goal already exists in this session and was left unchanged/,
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
   );
   assert.ok(notifications.some((message) => /already exists/.test(message)));
 
@@ -271,18 +543,27 @@ try {
     operation: "start",
     error: { code: "RPC_DISABLED", message: "Managed run RPC is disabled." },
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.match(editorText, /managed-run RPC is disabled/);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.ok(notifications.some((message) => /RPC is disabled/.test(message)));
 
   // No activation event must never be reported as a started Goal.
   bus.reset();
   process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS = "50";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
-  assert.match(
-    editorText,
-    /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./,
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
   );
   assert.ok(
     notifications.some((message) =>
@@ -291,7 +572,11 @@ try {
       ),
     ),
   );
-  assert.doesNotMatch(editorText, /Goal not started/);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
 
   // If the session switches while the optimizer runs, do not activate in the new session.
   bus.reset();
@@ -302,6 +587,8 @@ try {
     activeSessionId = "session-switched-during-optimization";
     return task;
   };
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   ctx.ui.editor = editor;
   activeSessionId = sessionBeforeOptimization;
@@ -315,6 +602,11 @@ try {
       /Session changed during optimization; Goal not started\./.test(message),
     ),
   );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "session change leaves the prompt editor untouched",
+  );
 
   assert.equal(
     bus.outstandingSubscriptions(),
@@ -326,6 +618,8 @@ try {
   bus.reset();
   process.env.PROMPT_OPT_TEST_FAIL = "1";
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_TEST_FAIL;
   assert.equal(
@@ -336,10 +630,10 @@ try {
   assert.ok(
     notifications.some((message) => /Prompt optimization failed/.test(message)),
   );
-  assert.equal(
-    editorText,
-    taskText,
-    "the draft is restored when the handoff fails",
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
   );
 
   // A runtime without the event bus must fail honestly instead of claiming a Goal.
@@ -351,22 +645,182 @@ try {
     appendEntry() {},
   });
   notifications.length = 0;
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await buslessHandler("--goal", ctx);
   assert.ok(
     notifications.some((message) =>
       /Goal not started: the Goal event bus is unavailable/.test(message),
     ),
   );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "missing event bus leaves the prompt editor untouched",
+  );
 
   // An unreadable handoff result must never be activated either.
   bus.reset();
   const validResult = process.env.PROMPT_OPT_TEST_GOAL_RESULT;
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = "not a handoff";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = validResult;
   assert.equal(bus.emits.length, 0, "an unconfirmed handoff must not emit");
   assert.ok(
-    notifications.some((message) => /unreadable goal handoff/i.test(message)),
+    notifications.some((message) => /unreadable goal result/i.test(message)),
+  );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "unreadable result leaves the prompt editor untouched",
+  );
+
+  bus.reset();
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
+    status: "inline",
+    objective: "x".repeat(4001),
+    definition_of_done: ["The criterion is verified"],
+  });
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0, "oversized result must not start a Goal");
+  assert.ok(notifications.some((message) => /4000-character limit/i.test(message)));
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "oversized Goal leaves the prompt editor untouched",
+  );
+  process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Every rejected Goal result must stop before preview and activation.
+  async function expectGoalRejected(result, pattern, message) {
+    bus.reset();
+    notifications.length = 0;
+    const previewsBefore = goalPreviews.length;
+    process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(result);
+    editorBeforeGoal = editorText;
+    editorWritesBeforeGoal = editorWrites;
+    await handler("--goal", ctx);
+    process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+    goalChoices = ["proceed"];
+    assert.equal(goalPreviews.length, previewsBefore, `${message}: no preview`);
+    assert.equal(bus.emits.length, 0, `${message}: no activation`);
+    assert.deepEqual(
+      [editorText, editorWrites],
+      [editorBeforeGoal, editorWritesBeforeGoal],
+      `${message}: editor untouched`,
+    );
+    assert.ok(
+      notifications.some((text) => pattern.test(text)),
+      `${message}: expected ${pattern}, got ${JSON.stringify(notifications)}`,
+    );
+  }
+
+  const rejectionDod = ["The rejection case is verified"];
+  const rejectionTask = `Rejected case objective.\n\nDefinition of Done:\n- ${rejectionDod[0]}\n\nStop when every criterion is verified.`;
+  const rejectionObjective = (handoff) =>
+    `Rejected case objective. Definition of Done: ${rejectionDod[0]}. Stop when every criterion is verified. The authoritative task specification is at: \`${handoff}\`.`;
+  const sessionHandoffDir = path.dirname(goalHandoffPath);
+  const handoffIn = async (name, content = rejectionTask) => {
+    const file = path.join(sessionHandoffDir, name);
+    await writeFile(file, content);
+    return file;
+  };
+
+  // (a) a handoff outside the current session directory
+  const outsideHandoff = path.join(
+    testHome,
+    ".pi",
+    "agent",
+    "handoffs",
+    "other-session",
+    "goal.md",
+  );
+  await mkdir(path.dirname(outsideHandoff), { recursive: true });
+  await writeFile(outsideHandoff, rejectionTask);
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: outsideHandoff,
+      objective: rejectionObjective(outsideHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /invalid handoff path/i,
+    "handoff outside the session directory",
+  );
+
+  // (b) traversal that escapes the session and names another one
+  const traversedHandoff = `${sessionHandoffDir}/../other-session/goal.md`;
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: traversedHandoff,
+      objective: rejectionObjective(traversedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /invalid handoff path/i,
+    "traversal handoff path",
+  );
+
+  // (c) a symlinked handoff file inside the session directory
+  const symlinkedHandoff = path.join(sessionHandoffDir, "symlinked.md");
+  await symlink(outsideHandoff, symlinkedHandoff);
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: symlinkedHandoff,
+      objective: rejectionObjective(symlinkedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /not a regular file/i,
+    "symlinked handoff",
+  );
+
+  // (d) a handoff whose Definition of Done differs from the validated criteria
+  const mismatchedHandoff = await handoffIn(
+    "mismatch.md",
+    "Rejected case objective.\n\nDefinition of Done:\n- Something else entirely\n\nStop when every criterion is verified.",
+  );
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: mismatchedHandoff,
+      objective: rejectionObjective(mismatchedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /does not match its validated Definition of Done/i,
+    "handoff Definition of Done mismatch",
+  );
+
+  // (e) an objective without a complete Definition of Done
+  await expectGoalRejected(
+    {
+      status: "inline",
+      objective: "A goal with no acceptance criteria.",
+      definition_of_done: rejectionDod,
+    },
+    /complete Definition of Done/i,
+    "objective without a Definition of Done",
+  );
+
+  // (f) an unknown status and (g) an empty clarification question
+  await expectGoalRejected(
+    {
+      status: "ready",
+      optimized_prompt: "task",
+      objective: rejectionObjective(goalHandoffPath),
+      definition_of_done: rejectionDod,
+    },
+    /invalid goal result/i,
+    "unknown result status",
+  );
+  await expectGoalRejected(
+    { status: "needs-clarification", question: "   " },
+    /invalid clarification result/i,
+    "empty clarification question",
   );
 
   bus.reset();
@@ -383,10 +837,18 @@ try {
     },
   ]);
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.match(
-    editorText,
-    /Goal not started: SUPERSEDED: The managed Goal was superseded\./,
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
+  assert.ok(
+    notifications.some((message) =>
+      /SUPERSEDED: The managed Goal was superseded/.test(message),
+    ),
     "a rolled-back activation is not reported as started",
   );
 
@@ -397,19 +859,31 @@ try {
     goalId: "goal-3",
     status: "active",
   }));
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
   const secondRunId = bus.emits[0]?.data.runId;
   assert.ok(
     secondRunId && secondRunId !== firstRunId,
     "each run uses a fresh runId",
   );
-  assert.match(editorText, /Goal started \(goal goal-3\)/);
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
 
   const argsBeforeMissingSession = await readFile(argsFile, "utf8");
   activeSessionId = undefined;
   editorText = "preserve draft";
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await handler("--goal", ctx);
-  assert.equal(editorText, "preserve draft");
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "Goal mode leaves the prompt editor untouched",
+  );
   assert.equal(
     await readFile(argsFile, "utf8"),
     argsBeforeMissingSession,
@@ -461,6 +935,10 @@ try {
   else process.env.PROMPT_OPT_TEST_SESSION_ID = oldSessionIdFile;
   if (oldPiSessionId === undefined) delete process.env.PI_SESSION_ID;
   else process.env.PI_SESSION_ID = oldPiSessionId;
+  if (oldHome === undefined) delete process.env.HOME;
+  else process.env.HOME = oldHome;
+  if (oldGoalInput === undefined) delete process.env.PROMPT_OPT_TEST_INPUT;
+  else process.env.PROMPT_OPT_TEST_INPUT = oldGoalInput;
   if (oldGoalResult === undefined)
     delete process.env.PROMPT_OPT_TEST_GOAL_RESULT;
   else process.env.PROMPT_OPT_TEST_GOAL_RESULT = oldGoalResult;

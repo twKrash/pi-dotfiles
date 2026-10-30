@@ -16,9 +16,12 @@ usage() {
   cat <<'HELP'
 --last | --adopt-cache | --history [HASH] | FILE | - [OPTIONS]
 
-  --goal                 Persist the optimized prompt to a session handoff.
-                         Goal activation is handled only by the Pi extension;
-                         direct CLI runs do not start a Goal or execute the task.
+  --goal                 Optimize the task for a Goal: a task within pi-goal's
+                         4000-character limit stays inline, a longer one is
+                         persisted to a session handoff. Goal activation is
+                         handled only by the Pi extension, which previews the
+                         handoff location and objective and asks
+                         proceed/edit/cancel; direct CLI runs do not start a Goal.
 
   (no input)             Edit a new task with $VISUAL/$EDITOR (default: nvim).
   --last                 Edit the previous task; reuse output if unchanged.
@@ -504,10 +507,10 @@ if [[ "$context_mode" -eq 1 ]]; then
 fi
 if [[ "$goal_mode" -eq 1 ]]; then
   prompt_parts+=(
-    'OPT-IN GOAL HANDOFF OUTPUT CONTRACT:'
-    'Optimize the task normally first and preserve every requirement in a complete, independently executable optimized prompt. Then derive a concise objective from that complete prompt, stating its intended outcome and essential constraints without adding requirements.'
-    'Return exactly one valid JSON object with string fields "optimized_prompt" and "goal_objective". The optimized_prompt value must contain the complete execution prompt, not a summary. The goal_objective value must be a concise, outcome-oriented one-line statement of that same task and its non-negotiable constraints; the handoff workflow adds the authoritative-file, compaction-recovery, and acceptance-verification instructions.'
-    'Do not execute the task, write files, invoke /goal, or start another agent. The caller persists the optimized prompt and starts the Goal through pi-goal managed-run RPC.'
+    'OPT-IN GOAL OUTPUT CONTRACT:'
+    'Optimize the task normally and preserve every requirement in optimized_prompt. Derive a concise, outcome-oriented goal_objective and a non-empty definition_of_done array of concrete, independently verifiable criteria without adding requirements. Keep the separate Definition of Done section out of optimized_prompt; the caller appends it once from definition_of_done.'
+    'If the request lacks enough information to define concrete acceptance criteria, do not guess: return status needs_clarification with one focused question. Otherwise return status ready with string fields optimized_prompt and goal_objective plus the definition_of_done string array.'
+    'Return exactly one valid JSON object and no prose. Do not execute the task, write files, invoke /goal, or start another agent. The caller validates the result and starts the Goal through pi-goal managed-run RPC.'
     ''
   )
 fi
@@ -518,7 +521,7 @@ prompt_parts+=(
 )
 if [[ "$goal_mode" -eq 1 ]]; then
   prompt_parts+=(
-    'OUTPUT CONTRACT: Return exactly one valid JSON object with string fields "optimized_prompt" and "goal_objective". Preserve the complete optimized execution prompt in optimized_prompt; derive goal_objective only after finishing it.'
+    'OUTPUT CONTRACT: Return exactly one JSON object with either status "ready", string fields "optimized_prompt" and "goal_objective", and a non-empty string array "definition_of_done", or status "needs_clarification" and a non-empty string field "question". Return no prose.'
   )
 else
   prompt_parts+=(
@@ -570,6 +573,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const GOAL_OBJECTIVE_LIMIT = 4000;
+const hasOmissionMarker = (value) =>
+  /\[\s*(?:(?:\.\.\.|…)\s*\]?\s*)?(?:\d+\s+)?(?:chunks?|lines?)\s+omitted(?:\s*(?:\.\.\.|…))?\s*\]/iu.test(value);
 let createdFile;
 try {
   const [answerFile, home, sessionId] = process.argv.slice(2);
@@ -579,42 +584,73 @@ try {
   const raw = fs.readFileSync(answerFile, "utf8").trim();
   const unfenced = raw.replace(/^```(?:json)?\s*\n?/u, "").replace(/\n?```$/u, "").trim();
   const result = JSON.parse(unfenced);
-  if (!result || typeof result.optimized_prompt !== "string" || !result.optimized_prompt.trim() ||
-      typeof result.goal_objective !== "string" || !result.goal_objective.trim()) {
-    throw new Error("optimizer response must contain non-empty optimized_prompt and goal_objective strings");
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("optimizer response must be a JSON object");
   }
-  const goalObjective = result.goal_objective.replace(/\s+/g, " ").trim();
-  const piDir = path.join(path.resolve(home), ".pi");
-  const agentDir = path.join(piDir, "agent");
-  const handoffsDir = path.join(agentDir, "handoffs");
-  const sessionDir = path.join(handoffsDir, sessionId);
-  // The handoff is the authority; the goal objective only has to point at it.
-  const file = path.join(sessionDir, `${crypto.randomUUID()}.md`);
-  const objective = `${goalObjective} The authoritative task specification is at: \`${file}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
-  if (objective.length > GOAL_OBJECTIVE_LIMIT) {
-    throw new Error(`goal objective exceeds pi-goal's ${GOAL_OBJECTIVE_LIMIT}-character limit (${objective.length})`);
+  if (result.status === "needs_clarification") {
+    if (typeof result.question !== "string" || !result.question.trim()) {
+      throw new Error("optimizer clarification response must contain a non-empty question");
+    }
+    const question = result.question.trim();
+    if (hasOmissionMarker(question)) {
+      throw new Error("optimizer response contains an omission marker");
+    }
+    process.stdout.write(`${JSON.stringify({ status: "needs-clarification", question })}\n`);
+  } else {
+    if (result.status !== "ready" || typeof result.optimized_prompt !== "string" ||
+        !result.optimized_prompt.trim() || typeof result.goal_objective !== "string" ||
+        !result.goal_objective.trim()) {
+      throw new Error("optimizer response must contain status ready, non-empty optimized_prompt and goal_objective strings");
+    }
+    if (!Array.isArray(result.definition_of_done) || result.definition_of_done.length === 0 ||
+        result.definition_of_done.some((item) => typeof item !== "string" || !item.trim())) {
+      throw new Error("optimizer response must contain a non-empty definition_of_done string array");
+    }
+    const criteria = result.definition_of_done.map((item) => item.replace(/\s+/g, " ").trim());
+    const optimizedPrompt = result.optimized_prompt.trim();
+    const goalObjective = result.goal_objective.replace(/\s+/g, " ").trim();
+    if ([optimizedPrompt, goalObjective, ...criteria].some(hasOmissionMarker)) {
+      throw new Error("optimizer response contains an omission marker");
+    }
+    const doneBlock = `Definition of Done:\n${criteria.map((item) => `- ${item}`).join("\n")}`;
+    const completePrompt = `${optimizedPrompt}\n\n${doneBlock}\n\nStop when every criterion is verified.`;
+    if (completePrompt.length <= GOAL_OBJECTIVE_LIMIT) {
+      process.stdout.write(`${JSON.stringify({ status: "inline", objective: completePrompt, definition_of_done: criteria })}\n`);
+    } else {
+      const piDir = path.join(path.resolve(home), ".pi");
+      const agentDir = path.join(piDir, "agent");
+      const handoffsDir = path.join(agentDir, "handoffs");
+      const sessionDir = path.join(handoffsDir, sessionId);
+      const file = path.join(sessionDir, `${crypto.randomUUID()}.md`);
+      const criteriaSummary = criteria.join("; ");
+      const criteriaEnding = /[.!?]$/u.test(criteriaSummary) ? "" : ".";
+      const objective = `${goalObjective} Definition of Done: ${criteriaSummary}${criteriaEnding} Stop when every criterion is verified. The authoritative task specification is at: \`${file}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+      if (objective.length > GOAL_OBJECTIVE_LIMIT) {
+        throw new Error(`goal objective exceeds pi-goal's ${GOAL_OBJECTIVE_LIMIT}-character limit (${objective.length})`);
+      }
+      for (const dir of [piDir, agentDir, handoffsDir, sessionDir]) {
+        try { fs.mkdirSync(dir, { mode: 0o700 }); }
+        catch (error) { if (error.code !== "EEXIST") throw error; }
+        const stat = fs.lstatSync(dir);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`unsafe handoff directory: ${dir}`);
+      }
+      fs.chmodSync(handoffsDir, 0o700);
+      fs.chmodSync(sessionDir, 0o700);
+      const fd = fs.openSync(file, "wx", 0o600);
+      createdFile = file;
+      try {
+        fs.writeFileSync(fd, completePrompt, "utf8");
+        fs.fsyncSync(fd);
+      } finally { fs.closeSync(fd); }
+      fs.chmodSync(file, 0o600);
+      const written = fs.readFileSync(file, "utf8");
+      const fileStat = fs.statSync(file);
+      if (written !== completePrompt || (fileStat.mode & 0o077) !== 0 || (fs.statSync(sessionDir).mode & 0o077) !== 0) {
+        throw new Error("handoff file verification failed");
+      }
+      process.stdout.write(`${JSON.stringify({ status: "handoff-written", handoff_path: file, objective, definition_of_done: criteria })}\n`);
+    }
   }
-  for (const dir of [piDir, agentDir, handoffsDir, sessionDir]) {
-    try { fs.mkdirSync(dir, { mode: 0o700 }); }
-    catch (error) { if (error.code !== "EEXIST") throw error; }
-    const stat = fs.lstatSync(dir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`unsafe handoff directory: ${dir}`);
-  }
-  fs.chmodSync(handoffsDir, 0o700);
-  fs.chmodSync(sessionDir, 0o700);
-  const fd = fs.openSync(file, "wx", 0o600);
-  createdFile = file;
-  try {
-    fs.writeFileSync(fd, result.optimized_prompt, "utf8");
-    fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
-  fs.chmodSync(file, 0o600);
-  const written = fs.readFileSync(file, "utf8");
-  const fileStat = fs.statSync(file);
-  if (written !== result.optimized_prompt || (fileStat.mode & 0o077) !== 0 || (fs.statSync(sessionDir).mode & 0o077) !== 0) {
-    throw new Error("handoff file verification failed");
-  }
-  process.stdout.write(`${JSON.stringify({ status: "handoff-written", handoff_path: file, objective })}\n`);
 } catch (error) {
   if (createdFile) { try { fs.unlinkSync(createdFile); } catch {} }
   console.error(`prompt-opt: goal handoff failed: ${error.message}`);
@@ -626,8 +662,8 @@ NODE
     die 'goal handoff failed; nothing was started'
   fi
   cp -- "$goal_output" "$answer"
-  handoff_path=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).handoff_path)' "$answer")
-  printf 'Goal handoff saved to: %s\n' "$handoff_path" >&2
+  handoff_path=$(node -e 'const result=JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (result.status === "handoff-written") process.stdout.write(result.handoff_path)' "$answer")
+  if [[ -n "$handoff_path" ]]; then printf 'Goal handoff saved to: %s\n' "$handoff_path" >&2; fi
   printf 'Goal activation is owned by the Pi extension; run this inside Pi to start it.\n' >&2
   debug_log 'phase=complete'
   cat -- "$answer"
