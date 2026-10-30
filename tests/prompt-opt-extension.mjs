@@ -7,6 +7,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -601,6 +602,11 @@ try {
       /Session changed during optimization; Goal not started\./.test(message),
     ),
   );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "session change leaves the prompt editor untouched",
+  );
 
   assert.equal(
     bus.outstandingSubscriptions(),
@@ -639,11 +645,18 @@ try {
     appendEntry() {},
   });
   notifications.length = 0;
+  editorBeforeGoal = editorText;
+  editorWritesBeforeGoal = editorWrites;
   await buslessHandler("--goal", ctx);
   assert.ok(
     notifications.some((message) =>
       /Goal not started: the Goal event bus is unavailable/.test(message),
     ),
+  );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "missing event bus leaves the prompt editor untouched",
   );
 
   // An unreadable handoff result must never be activated either.
@@ -658,6 +671,11 @@ try {
   assert.ok(
     notifications.some((message) => /unreadable goal result/i.test(message)),
   );
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "unreadable result leaves the prompt editor untouched",
+  );
 
   bus.reset();
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
@@ -670,7 +688,140 @@ try {
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0, "oversized result must not start a Goal");
   assert.ok(notifications.some((message) => /4000-character limit/i.test(message)));
+  assert.deepEqual(
+    [editorText, editorWrites],
+    [editorBeforeGoal, editorWritesBeforeGoal],
+    "oversized Goal leaves the prompt editor untouched",
+  );
   process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+
+  // Every rejected Goal result must stop before preview and activation.
+  async function expectGoalRejected(result, pattern, message) {
+    bus.reset();
+    notifications.length = 0;
+    const previewsBefore = goalPreviews.length;
+    process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(result);
+    editorBeforeGoal = editorText;
+    editorWritesBeforeGoal = editorWrites;
+    await handler("--goal", ctx);
+    process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify(initialGoalResult);
+    goalChoices = ["proceed"];
+    assert.equal(goalPreviews.length, previewsBefore, `${message}: no preview`);
+    assert.equal(bus.emits.length, 0, `${message}: no activation`);
+    assert.deepEqual(
+      [editorText, editorWrites],
+      [editorBeforeGoal, editorWritesBeforeGoal],
+      `${message}: editor untouched`,
+    );
+    assert.ok(
+      notifications.some((text) => pattern.test(text)),
+      `${message}: expected ${pattern}, got ${JSON.stringify(notifications)}`,
+    );
+  }
+
+  const rejectionDod = ["The rejection case is verified"];
+  const rejectionTask = `Rejected case objective.\n\nDefinition of Done:\n- ${rejectionDod[0]}\n\nStop when every criterion is verified.`;
+  const rejectionObjective = (handoff) =>
+    `Rejected case objective. Definition of Done: ${rejectionDod[0]}. Stop when every criterion is verified. The authoritative task specification is at: \`${handoff}\`.`;
+  const sessionHandoffDir = path.dirname(goalHandoffPath);
+  const handoffIn = async (name, content = rejectionTask) => {
+    const file = path.join(sessionHandoffDir, name);
+    await writeFile(file, content);
+    return file;
+  };
+
+  // (a) a handoff outside the current session directory
+  const outsideHandoff = path.join(
+    testHome,
+    ".pi",
+    "agent",
+    "handoffs",
+    "other-session",
+    "goal.md",
+  );
+  await mkdir(path.dirname(outsideHandoff), { recursive: true });
+  await writeFile(outsideHandoff, rejectionTask);
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: outsideHandoff,
+      objective: rejectionObjective(outsideHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /invalid handoff path/i,
+    "handoff outside the session directory",
+  );
+
+  // (b) traversal that escapes the session and names another one
+  const traversedHandoff = `${sessionHandoffDir}/../other-session/goal.md`;
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: traversedHandoff,
+      objective: rejectionObjective(traversedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /invalid handoff path/i,
+    "traversal handoff path",
+  );
+
+  // (c) a symlinked handoff file inside the session directory
+  const symlinkedHandoff = path.join(sessionHandoffDir, "symlinked.md");
+  await symlink(outsideHandoff, symlinkedHandoff);
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: symlinkedHandoff,
+      objective: rejectionObjective(symlinkedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /not a regular file/i,
+    "symlinked handoff",
+  );
+
+  // (d) a handoff whose Definition of Done differs from the validated criteria
+  const mismatchedHandoff = await handoffIn(
+    "mismatch.md",
+    "Rejected case objective.\n\nDefinition of Done:\n- Something else entirely\n\nStop when every criterion is verified.",
+  );
+  await expectGoalRejected(
+    {
+      status: "handoff-written",
+      handoff_path: mismatchedHandoff,
+      objective: rejectionObjective(mismatchedHandoff),
+      definition_of_done: rejectionDod,
+    },
+    /does not match its validated Definition of Done/i,
+    "handoff Definition of Done mismatch",
+  );
+
+  // (e) an objective without a complete Definition of Done
+  await expectGoalRejected(
+    {
+      status: "inline",
+      objective: "A goal with no acceptance criteria.",
+      definition_of_done: rejectionDod,
+    },
+    /complete Definition of Done/i,
+    "objective without a Definition of Done",
+  );
+
+  // (f) an unknown status and (g) an empty clarification question
+  await expectGoalRejected(
+    {
+      status: "ready",
+      optimized_prompt: "task",
+      objective: rejectionObjective(goalHandoffPath),
+      definition_of_done: rejectionDod,
+    },
+    /invalid goal result/i,
+    "unknown result status",
+  );
+  await expectGoalRejected(
+    { status: "needs-clarification", question: "   " },
+    /invalid clarification result/i,
+    "empty clarification question",
+  );
 
   bus.reset();
   bus.respondOnStart(({ runId }) => [

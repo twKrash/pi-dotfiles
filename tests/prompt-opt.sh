@@ -808,10 +808,16 @@ assert.equal(fs.existsSync(path.join(process.argv[3], ".pi")), false);
 NODE
 # Omission markers in any optimizer-generated field fail closed before filesystem writes.
 for marker_field in optimized_prompt goal_objective definition_of_done question; do
-  node - "$TMP/goal-marker-$marker_field.json" "$marker_field" <<'NODE'
+ for marker_index in 1 2 3 4; do
+  case "$marker_index" in
+    1) marker='[…] 4 chunks omitted …]' ;;
+    2) marker='[…]4 chunks omitted…]' ;;
+    3) marker='[…4 chunks omitted…]' ;;
+    4) marker='[... 4 lines omitted ...]' ;;
+  esac
+  node - "$TMP/goal-marker-$marker_field-$marker_index.json" "$marker_field" "$marker" <<'NODE'
 const fs = require("node:fs");
-const [file, field] = process.argv.slice(2);
-const marker = "[… 4 chunks omitted …]";
+const [file, field, marker] = process.argv.slice(2);
 const result = { status: "ready", optimized_prompt: "Complete task.", goal_objective: "Complete task.", definition_of_done: ["The result is verified."] };
 if (field === "question") {
   result.status = "needs_clarification";
@@ -820,17 +826,19 @@ if (field === "question") {
 else result[field] = marker;
 fs.writeFileSync(file, JSON.stringify(result));
 NODE
-  MARKER_HOME="$TMP/goal-marker-$marker_field-home"
+  MARKER_ID="$marker_field-$marker_index"
+  MARKER_HOME="$TMP/goal-marker-$MARKER_ID-home"
   mkdir -p "$MARKER_HOME"
   if printf 'task\n' | env HOME="$MARKER_HOME" PI_SESSION_ID="$GOAL_SESSION" PROMPT_LAB_DIR="$LAB" \
-    XDG_STATE_HOME="$TMP/goal-marker-$marker_field-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-marker-$marker_field-calls" \
-    GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-marker-$marker_field.json" "$PROMPT_OPT" --goal - \
-    >"$TMP/goal-marker-$marker_field.out" 2>"$TMP/goal-marker-$marker_field.err"; then
-    echo "goal mode accepted an omission marker in $marker_field" >&2; exit 1
+    XDG_STATE_HOME="$TMP/goal-marker-$MARKER_ID-state" PATH="$TMP/mock-bin:$PATH" PI_CALLS="$TMP/goal-marker-$MARKER_ID-calls" \
+    GOAL_MODE=1 GOAL_OUTPUT_FILE="$TMP/goal-marker-$marker_field-$marker_index.json" "$PROMPT_OPT" --goal - \
+    >"$TMP/goal-marker-$MARKER_ID.out" 2>"$TMP/goal-marker-$MARKER_ID.err"; then
+    echo "goal mode accepted omission marker '$marker' in $marker_field" >&2; exit 1
   fi
-  grep -qi 'omission marker' "$TMP/goal-marker-$marker_field.err"
-  test ! -s "$TMP/goal-marker-$marker_field.out"
+  grep -qi 'omission marker' "$TMP/goal-marker-$MARKER_ID.err"
+  test ! -s "$TMP/goal-marker-$MARKER_ID.out"
   test ! -e "$MARKER_HOME/.pi"
+ done
 done
 
 node "$ROOT/tests/prompt-opt-extension.mjs"

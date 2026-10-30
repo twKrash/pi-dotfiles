@@ -71,3 +71,5 @@
 - [x] Review the full diff for the inline/handoff boundary, DoD coverage, omission-marker rejection, prompt-editor non-mutation, and objective/handoff consistency.
 - [x] Run diagnostics on changed source paths and record unrelated findings separately.
 - [x] Commit and push the completed change to `feat/prompt-opt-goal-preview`; confirm PR #24 remains open and report CI status.
+
+**Delivery record:** PR #24 (`twKrash/pi-dotfiles`) is open. The repository defines no CI workflow for this branch, so GitHub reports zero check runs and a combined status of `pending`; local verification is the evidence for this change.

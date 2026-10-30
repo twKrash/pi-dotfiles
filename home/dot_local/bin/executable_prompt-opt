@@ -16,9 +16,12 @@ usage() {
   cat <<'HELP'
 --last | --adopt-cache | --history [HASH] | FILE | - [OPTIONS]
 
-  --goal                 Persist the optimized prompt to a session handoff.
-                         Goal activation is handled only by the Pi extension;
-                         direct CLI runs do not start a Goal or execute the task.
+  --goal                 Optimize the task for a Goal: a task within pi-goal's
+                         4000-character limit stays inline, a longer one is
+                         persisted to a session handoff. Goal activation is
+                         handled only by the Pi extension, which previews the
+                         handoff location and objective and asks
+                         proceed/edit/cancel; direct CLI runs do not start a Goal.
 
   (no input)             Edit a new task with $VISUAL/$EDITOR (default: nvim).
   --last                 Edit the previous task; reuse output if unchanged.
@@ -571,7 +574,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const GOAL_OBJECTIVE_LIMIT = 4000;
 const hasOmissionMarker = (value) =>
-  /\[\s*(?:(?:\.\.\.|… )\s*)?(?:\d+\s+)?(?:chunks?|lines?)\s+omitted(?:\s*(?:\.\.\.|…))?\s*\]/iu.test(value);
+  /\[\s*(?:(?:\.\.\.|…)\s*\]?\s*)?(?:\d+\s+)?(?:chunks?|lines?)\s+omitted(?:\s*(?:\.\.\.|…))?\s*\]/iu.test(value);
 let createdFile;
 try {
   const [answerFile, home, sessionId] = process.argv.slice(2);
