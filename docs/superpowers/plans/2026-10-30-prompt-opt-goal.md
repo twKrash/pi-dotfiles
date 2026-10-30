@@ -70,4 +70,4 @@
 - [x] Run `node tests/prompt-opt-extension.mjs`, `sh tests/prompt-opt.sh`, and `git diff --check`.
 - [x] Review the full diff for the inline/handoff boundary, DoD coverage, omission-marker rejection, prompt-editor non-mutation, and objective/handoff consistency.
 - [x] Run diagnostics on changed source paths and record unrelated findings separately.
-- [ ] Commit and push the completed change to `feat/prompt-opt-goal-preview`; confirm PR #24 remains open and report CI status.
+- [x] Commit and push the completed change to `feat/prompt-opt-goal-preview`; confirm PR #24 remains open and report CI status.
