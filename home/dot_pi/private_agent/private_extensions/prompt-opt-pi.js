@@ -479,20 +479,58 @@ export default function (pi) {
         );
         if (goalMode) {
           const handoff = parseGoalHandoff(optimized);
+          ctx.ui.setEditorText("Goal handof");
+          const authorityStart = handoff.objective.indexOf(
+            " The authoritative task specification is at: ",
+          );
+          const handoffInstructions =
+            authorityStart >= 0
+              ? handoff.objective.slice(authorityStart)
+              : ` The authoritative task specification is at: ${JSON.stringify(handoff.handoff_path)}. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
+          let objective = handoff.objective;
+          while (true) {
+            const preview =
+              `Goal preview:\n- Handoff file: ${handoff.handoff_path}\n- Goal: ${objective}`;
+            const choice = await ctx.ui.select(preview, [
+              "proceed",
+              "edit",
+              "cancel",
+            ]);
+            if (choice === "proceed") break;
+            if (choice !== "edit") {
+              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
+              return;
+            }
+            const edited = await ctx.ui.editor("Edit Goal", objective);
+            if (!edited?.trim()) {
+              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
+              return;
+            }
+            const editedSummary = edited
+              .trim()
+              .replace(handoffInstructions, "")
+              .trim();
+            if (!editedSummary) {
+              ctx.ui.notify("Goal handoff saved; Goal not started.", "info");
+              return;
+            }
+            objective = editedSummary + handoffInstructions;
+            if (objective.length > 4000) {
+              ctx.ui.notify(
+                "Edited Goal exceeds pi-goal's 4000-character limit; Goal not started.",
+                "error",
+              );
+              return;
+            }
+          }
           if (currentSessionId(ctx) !== goalSessionId) {
-            const status =
-              "Session changed during optimization; Goal not started.";
-            ctx.ui.setEditorText(
-              `Goal handoff: ${handoff.handoff_path}\n${status}`,
+            ctx.ui.notify(
+              "Session changed during optimization; Goal not started.",
+              "error",
             );
-            ctx.ui.notify(status, "error");
             return;
           }
-          const activation = await activateGoal(
-            pi,
-            handoff.objective,
-            debugLog,
-          );
+          const activation = await activateGoal(pi, objective, debugLog);
           const status = activation.ok
             ? `Goal started (goal ${activation.goalId})`
             : activation.code === "NO_CONFIRMATION"
@@ -503,9 +541,6 @@ export default function (pi) {
             code: activation.code,
             total_elapsed_ms: Date.now() - startedAt,
           });
-          ctx.ui.setEditorText(
-            `Goal handoff: ${handoff.handoff_path}\n${status}`,
-          );
           ctx.ui.notify(
             `Goal handoff: ${handoff.handoff_path}; ${status}`,
             activation.ok ? "info" : "error",

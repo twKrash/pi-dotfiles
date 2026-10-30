@@ -68,11 +68,13 @@ process.env.PROMPT_OPT_TEST_ARGS = argsFile;
 process.env.PROMPT_OPT_TEST_CWD = cwdFile;
 process.env.PROMPT_OPT_TEST_SESSION_ID = sessionIdFile;
 process.env.PROMPT_OPT_GOAL_SETTLE_MS = "10";
+const goalHandoffPath = path.join(temp, "handoffs", "session-a", "goal-1.md");
 const goalObjective =
-  "Complete this task: rewrite the importer and keep its error contract.";
+  "Complete this task: rewrite the importer and keep its error contract." +
+  ` The authoritative task specification is at: \`${goalHandoffPath}\`. Read it fully before execution; after compaction or whenever requirements become unclear, consult it again to preserve its requirements; verify its acceptance criteria before completing the goal.`;
 process.env.PROMPT_OPT_TEST_GOAL_RESULT = JSON.stringify({
   status: "handoff-written",
-  handoff_path: path.join(temp, "handoffs", "session-a", "goal-1.md"),
+  handoff_path: goalHandoffPath,
   objective: goalObjective,
 });
 
@@ -82,6 +84,9 @@ try {
   const notifications = [];
   let editorText = "";
   let taskText = "sample task";
+  let goalChoices = ["proceed"];
+  let editedGoal = "Edited goal objective";
+  const goalPreviews = [];
   let activeSessionId = "01a17a4d-c236-7573-b7e3-60a763bbbec8";
   const bus = createEventBus();
   promptOptExtension({
@@ -139,8 +144,13 @@ try {
     },
     cwd: contextWorkspace,
     ui: {
-      async editor() {
+      async editor(title, prefill) {
+        if (title === "Edit Goal") return editedGoal;
         return taskText;
+      },
+      async select(title, options) {
+        goalPreviews.push({ title, options });
+        return goalChoices.length ? goalChoices.shift() : "proceed";
       },
       notify(message) {
         notifications.push(message);
@@ -230,15 +240,22 @@ try {
     true,
     "the run channel must be subscribed before the start request",
   );
-  assert.match(editorText, /Goal handoff: /);
-  assert.ok(
-    editorText.includes(path.join(temp, "handoffs", "session-a", "goal-1.md")),
-    "the handoff location is reported",
-  );
+  assert.equal(editorText, "Goal handof");
   assert.ok(
     !editorText.includes(goalObjective),
-    "the prompt itself is not re-printed",
+    "the goal value is not inserted into the prompt input",
   );
+  const preview = goalPreviews.at(-1);
+  assert.deepEqual(preview.options, ["proceed", "edit", "cancel"]);
+  assert.ok(
+    preview.title.startsWith(
+      "Goal preview:\n- Handoff file: " +
+        path.join(temp, "handoffs", "session-a", "goal-1.md") +
+        "\n",
+    ),
+    "the handoff location is the first preview bullet",
+  );
+  assert.ok(preview.title.includes("- Goal: " + goalObjective));
   assert.ok(
     notifications.some((message) =>
       /Goal started \(goal goal-1\)/.test(message),
@@ -246,6 +263,75 @@ try {
     "activation requires the managed-run confirmation",
   );
   assert.ok(!notifications.some((message) => /Goal not started/.test(message)));
+
+  // Editing changes the objective sent to the managed-run API.
+  bus.reset();
+  goalChoices = ["edit", "proceed"];
+  editedGoal =
+    `Edited objective with narrower scope. The authoritative task specification is at: \`${goalHandoffPath}\`. Read it fully before execution.`;
+  bus.respondOnStart(({ runId }) => ({
+    type: "state",
+    runId,
+    goalId: "goal-edited",
+    status: "active",
+  }));
+  await handler("--goal", ctx);
+  assert.ok(bus.emits[0].data.objective.startsWith("Edited objective with narrower scope."));
+  assert.ok(
+    bus.emits[0].data.objective.includes(
+      "after compaction or whenever requirements become unclear",
+    ),
+  );
+  assert.ok(
+    bus.emits[0].data.objective.includes(
+      "verify its acceptance criteria before completing the goal",
+    ),
+  );
+  assert.ok(
+    bus.emits[0].data.objective.includes(
+      path.join(temp, "handoffs", "session-a", "goal-1.md"),
+    ),
+  );
+  assert.ok(bus.emits[0].data.objective.includes("Read it fully before execution"));
+  assert.equal(editorText, "Goal handof");
+  assert.ok(goalPreviews.at(-1).title.includes("- Goal: " + editedGoal));
+
+  // Cancelling the preview never starts a Goal.
+  bus.reset();
+  goalChoices = ["cancel"];
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  assert.equal(editorText, "Goal handof");
+  goalChoices = ["proceed"];
+
+  // Dismissing the preview never activates a Goal.
+  bus.reset();
+  goalChoices = [undefined];
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+
+  // Cancelling the editor or the follow-up preview also prevents activation.
+  bus.reset();
+  goalChoices = ["edit"];
+  editedGoal = "";
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  bus.reset();
+  goalChoices = ["edit", "cancel"];
+  editedGoal = "Edited goal";
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+
+  // An edit that exceeds pi-goal's limit is rejected without activation.
+  bus.reset();
+  goalChoices = ["edit"];
+  editedGoal = "x".repeat(4000);
+  await handler("--goal", ctx);
+  assert.equal(bus.emits.length, 0);
+  assert.ok(
+    notifications.some((message) => /4000-character limit/.test(message)),
+  );
+  editedGoal = "Edited goal objective";
 
   // An existing Goal is reported, never replaced: one emit, no second request.
   bus.reset();
@@ -257,10 +343,7 @@ try {
   }));
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 1);
-  assert.match(
-    editorText,
-    /Goal not started: a Goal already exists in this session and was left unchanged/,
-  );
+  assert.equal(editorText, "Goal handof");
   assert.ok(notifications.some((message) => /already exists/.test(message)));
 
   // RPC disabled is an honest failure, not a silent success.
@@ -272,7 +355,7 @@ try {
     error: { code: "RPC_DISABLED", message: "Managed run RPC is disabled." },
   }));
   await handler("--goal", ctx);
-  assert.match(editorText, /managed-run RPC is disabled/);
+  assert.equal(editorText, "Goal handof");
   assert.ok(notifications.some((message) => /RPC is disabled/.test(message)));
 
   // No activation event must never be reported as a started Goal.
@@ -280,10 +363,7 @@ try {
   process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS = "50";
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
-  assert.match(
-    editorText,
-    /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./,
-  );
+  assert.equal(editorText, "Goal handof");
   assert.ok(
     notifications.some((message) =>
       /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./.test(
@@ -291,7 +371,7 @@ try {
       ),
     ),
   );
-  assert.doesNotMatch(editorText, /Goal not started/);
+  assert.equal(editorText, "Goal handof");
 
   // If the session switches while the optimizer runs, do not activate in the new session.
   bus.reset();
@@ -384,9 +464,11 @@ try {
   ]);
   editorText = "preserve draft";
   await handler("--goal", ctx);
-  assert.match(
-    editorText,
-    /Goal not started: SUPERSEDED: The managed Goal was superseded\./,
+  assert.equal(editorText, "Goal handof");
+  assert.ok(
+    notifications.some((message) =>
+      /SUPERSEDED: The managed Goal was superseded/.test(message),
+    ),
     "a rolled-back activation is not reported as started",
   );
 
@@ -403,7 +485,7 @@ try {
     secondRunId && secondRunId !== firstRunId,
     "each run uses a fresh runId",
   );
-  assert.match(editorText, /Goal started \(goal goal-3\)/);
+  assert.equal(editorText, "Goal handof");
 
   const argsBeforeMissingSession = await readFile(argsFile, "utf8");
   activeSessionId = undefined;
