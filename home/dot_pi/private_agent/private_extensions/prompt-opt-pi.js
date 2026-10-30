@@ -479,7 +479,6 @@ export default function (pi) {
         );
         if (goalMode) {
           const handoff = parseGoalHandoff(optimized);
-          ctx.ui.setEditorText("Goal handof");
           const authorityStart = handoff.objective.indexOf(
             " The authoritative task specification is at: ",
           );

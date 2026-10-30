@@ -221,6 +221,7 @@ try {
     goalId: "goal-1",
     status: "active",
   }));
+  const promptBeforeGoal = editorText;
   await handler(`--goal --context '${context}'`, ctx);
   const goalArgs = await readFile(argsFile, "utf8");
   assert.equal(
@@ -240,10 +241,10 @@ try {
     true,
     "the run channel must be subscribed before the start request",
   );
-  assert.equal(editorText, "Goal handof");
-  assert.ok(
-    !editorText.includes(goalObjective),
-    "the goal value is not inserted into the prompt input",
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
   );
   const preview = goalPreviews.at(-1);
   assert.deepEqual(preview.options, ["proceed", "edit", "cancel"]);
@@ -293,7 +294,11 @@ try {
     ),
   );
   assert.ok(bus.emits[0].data.objective.includes("Read it fully before execution"));
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
   assert.ok(goalPreviews.at(-1).title.includes("- Goal: " + editedGoal));
 
   // Cancelling the preview never starts a Goal.
@@ -301,7 +306,11 @@ try {
   goalChoices = ["cancel"];
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 0);
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
   goalChoices = ["proceed"];
 
   // Dismissing the preview never activates a Goal.
@@ -343,7 +352,11 @@ try {
   }));
   await handler("--goal", ctx);
   assert.equal(bus.emits.length, 1);
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
   assert.ok(notifications.some((message) => /already exists/.test(message)));
 
   // RPC disabled is an honest failure, not a silent success.
@@ -355,7 +368,11 @@ try {
     error: { code: "RPC_DISABLED", message: "Managed run RPC is disabled." },
   }));
   await handler("--goal", ctx);
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
   assert.ok(notifications.some((message) => /RPC is disabled/.test(message)));
 
   // No activation event must never be reported as a started Goal.
@@ -363,7 +380,11 @@ try {
   process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS = "50";
   await handler("--goal", ctx);
   delete process.env.PROMPT_OPT_GOAL_CONFIRM_TIMEOUT_MS;
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
   assert.ok(
     notifications.some((message) =>
       /Goal activation unconfirmed\.\nCheck \/goal status before retrying\./.test(
@@ -371,7 +392,11 @@ try {
       ),
     ),
   );
-  assert.equal(editorText, "Goal handof");
+  assert.equal(
+    editorText,
+    promptBeforeGoal,
+    "Goal mode leaves prompt input untouched",
+  );
 
   // If the session switches while the optimizer runs, do not activate in the new session.
   bus.reset();
@@ -464,7 +489,7 @@ try {
   ]);
   editorText = "preserve draft";
   await handler("--goal", ctx);
-  assert.equal(editorText, "Goal handof");
+  assert.equal(editorText, "preserve draft");
   assert.ok(
     notifications.some((message) =>
       /SUPERSEDED: The managed Goal was superseded/.test(message),
@@ -485,7 +510,7 @@ try {
     secondRunId && secondRunId !== firstRunId,
     "each run uses a fresh runId",
   );
-  assert.equal(editorText, "Goal handof");
+  assert.equal(editorText, "preserve draft");
 
   const argsBeforeMissingSession = await readFile(argsFile, "utf8");
   activeSessionId = undefined;
