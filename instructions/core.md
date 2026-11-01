@@ -44,7 +44,7 @@ Approval applies only to the specific action approved. Delegation or automation 
 
 ## Memory discipline
 
-The global `MEMORY.md` stores durable cross-session facts, preferences, and context.
+The global `MEMORY.md` is `~/.config/ai-memory/MEMORY.md`, shared by every harness. It stores durable cross-session facts, preferences, and context. Treat it as read-only unless the user approves the exact change; never write durable memory anywhere else, including a harness's own auto-memory.
 
 Consult it when prior decisions or preferences may materially affect the task, but prefer canonical project sources when available.
 
@@ -65,7 +65,7 @@ Do not create duplicate sources of truth; prefer updating an existing rule over 
 
 ## Reusable scripts
 
-If `MEMORY.md` names a reusable-scripts directory, search it before writing a script to perform an action (for example, `grep -rH '^# purpose:' <dir>`), and reuse or extend a match. Save a new script there only if it is parameterizable and likely to recur; keep one-offs in scratch space.
+Before writing a script to perform an action, read the "Reusable scripts" section of `MEMORY.md`. If it names a directory, search it (for example, `grep -rH '^# purpose:' <dir>`) and reuse or extend a match. Save a new script there only if it is parameterizable and likely to recur; keep one-offs in scratch space.
 
 ## Delegation
 

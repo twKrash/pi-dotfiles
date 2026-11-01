@@ -48,7 +48,7 @@ Core is `instructions/core.md` (no harness or provider specifics). Local is the 
 - `home/ai/prompt_engineering/`: canonical prompt-engineering lab (`~/ai/prompt_engineering`, the `prompt-opt` default; `PROMPT_LAB_DIR` overrides at runtime).
 - `home/dot_pi/private_agent/private_extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
 - `home/dot_pi/private_agent/skills/prompt-engineering/`: Pi skill generated from the lab (`SKILL.md` = Pi metadata + lab `AGENTS.md`; references included from the lab).
-- `home/dot_pi/private_agent/create_empty_MEMORY.md`: memory template, created only when absent (an existing file, even an empty one, is kept).
+- `home/dot_config/private_ai-memory/create_empty_MEMORY.md`: shared memory template (`~/.config/ai-memory/MEMORY.md`, used by every harness), created only when absent (an existing file, even an empty one, is kept).
 - `home/dot_pi/private_agent/modify_settings.json.tmpl`, `modify_mcp.json.tmpl`: merge repo defaults into the live files via `scripts/merge-json.mjs` (stdin → stdout). Unrelated settings, extra packages, other MCP servers, and keys Pi writes itself are kept; conflicting local values win and are reported. The `claude`/`codex` profile replaces only subagent model/thinking fields; `none` leaves models untouched. The Claude profile adds `npm:pi-claude-agent-sdk` (packages are not installed; use `pi update --extensions` after review).
 - `home/.chezmoitemplates/instructions.tmpl`: composes the per-harness instruction files.
 - `instructions/`: core and per-harness instruction sources.

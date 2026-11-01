@@ -40,7 +40,7 @@
       "/tmp/*": "allow",
       "/tmp": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
-      "~/.pi/agent/MEMORY.md": "allow",
+      "~/.config/ai-memory/MEMORY.md": "allow",
       "~/pi": "allow"
     },
 
@@ -54,7 +54,7 @@
       "~/.agents/*": "allow",
       "~/.codex/plugins/*": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
-      "~/.pi/agent/MEMORY.md": "allow"
+      "~/.config/ai-memory/MEMORY.md": "allow"
     },
     "external_directory_write": {
       "/tmp/*": "allow",
@@ -63,7 +63,7 @@
       "~/.cache/graphify-queries.log": "allow",
       "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
       "~/.pi/tmp/*": "allow",
-      "~/.pi/agent/MEMORY.md": "allow"
+      "~/.config/ai-memory/MEMORY.md": "allow"
     },
     "skill": {
       "*": "allow",

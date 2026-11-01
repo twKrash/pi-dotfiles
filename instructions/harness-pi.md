@@ -4,7 +4,6 @@ This section only specializes the instructions above for Pi.
 
 ## Locations
 
-- Global memory: `~/.pi/agent/MEMORY.md`.
 - Scratch space: `~/.pi/tmp/`. Never put project worktrees there.
 
 ## Skills

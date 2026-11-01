@@ -64,7 +64,8 @@ H="$TMP/hybrid/home"
 # Existing Pi settings: unrelated values, custom packages, and local tool limits survive;
 # an existing empty MEMORY.md is kept (chezmoi removes empty targets unless marked empty_).
 mkdir -p "$H/.pi/agent/extensions/pi-permission-system"
-: >"$H/.pi/agent/MEMORY.md"
+mkdir -p "$H/.config/ai-memory"
+: >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
 printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
@@ -119,8 +120,8 @@ test -x "$H/.local/bin/prompt-opt"
 cmp "$ROOT/home/dot_local/bin/executable_prompt-opt" "$H/.local/bin/prompt-opt"
 cmp "$ROOT/home/dot_local/bin/prompt-opt-history.mjs" "$H/.local/bin/prompt-opt-history.mjs"
 cmp "$ROOT/home/dot_pi/private_agent/private_extensions/prompt-opt-pi.js" "$H/.pi/agent/extensions/prompt-opt-pi.js"
-test -f "$H/.pi/agent/MEMORY.md"
-test ! -s "$H/.pi/agent/MEMORY.md"
+test -f "$H/.config/ai-memory/MEMORY.md"
+test ! -s "$H/.config/ai-memory/MEMORY.md"
 # Pi's agent directory holds credentials: it and the extension config directories stay private.
 for dir in .pi/agent .pi/agent/extensions .pi/agent/extensions/pi-permission-system; do
   test "$(ls -ld "$H/$dir" | cut -c1-10)" = drwx------
@@ -182,9 +183,9 @@ cz hybrid apply
 grep -q piWroteThis "$H/.pi/agent/settings.json"
 test -z "$(cz hybrid diff)"
 # MEMORY.md is created once and never overwritten.
-printf '%s\n' 'my memory' >"$H/.pi/agent/MEMORY.md"
+printf '%s\n' 'my memory' >"$H/.config/ai-memory/MEMORY.md"
 cz hybrid apply
-grep -qx 'my memory' "$H/.pi/agent/MEMORY.md"
+grep -qx 'my memory' "$H/.config/ai-memory/MEMORY.md"
 # Editing local.md flows into every generated instruction file on the next apply.
 printf '%s\n' 'updated local rule' >>"$LOCAL"
 cz hybrid apply
@@ -211,7 +212,7 @@ cmp "$ROOT/home/dot_pi/private_agent/private_extensions/subagent/config.json" "$
 init home pi/codex codex
 cz home apply
 C="$TMP/home/home"
-cmp "$ROOT/home/dot_pi/private_agent/create_empty_MEMORY.md" "$C/.pi/agent/MEMORY.md"
+cmp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$C/.config/ai-memory/MEMORY.md"
 expected_instructions codex "$TMP/home/local.md" >"$TMP/expected-codex.md"
 cmp "$TMP/expected-codex.md" "$C/.codex/AGENTS.md"
 grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
@@ -253,19 +254,19 @@ printf '#!/bin/sh\necho 20260101000000\n' >"$TMP/fixed-date/date"
 chmod +x "$TMP/fixed-date/date"
 init retry pi none
 Y="$TMP/retry/home"
-mkdir -p "$Y/ai/prompt_engineering" "$Y/.pi/agent"
+mkdir -p "$Y/ai/prompt_engineering" "$Y/.pi/agent" "$Y/.config/ai-memory"
 printf '%s\n' 'my lab' >"$Y/ai/prompt_engineering/AGENTS.md"
-printf '%s\n' 'my memory' >"$Y/.pi/agent/MEMORY.md"
-chmod 000 "$Y/.pi/agent/MEMORY.md"
-if (PATH="$TMP/fixed-date:$PATH" && export PATH && cz retry apply >/dev/null 2>&1); then chmod 644 "$Y/.pi/agent/MEMORY.md"; exit 1; fi
-chmod 644 "$Y/.pi/agent/MEMORY.md"
+printf '%s\n' 'my memory' >"$Y/.config/ai-memory/MEMORY.md"
+chmod 000 "$Y/.config/ai-memory/MEMORY.md"
+if (PATH="$TMP/fixed-date:$PATH" && export PATH && cz retry apply >/dev/null 2>&1); then chmod 644 "$Y/.config/ai-memory/MEMORY.md"; exit 1; fi
+chmod 644 "$Y/.config/ai-memory/MEMORY.md"
 if (PATH="$TMP/fixed-date:$PATH" && export PATH && cz retry apply >/dev/null 2>&1); then exit 1; fi
 test "$(find "$Y/.local/state/pi-dotfiles" -mindepth 1 -maxdepth 1 -name 'adoption-backup-*' | wc -l)" -eq 2
 test "$(find "$Y/.local/state/pi-dotfiles" -mindepth 2 -maxdepth 2 -name COMPLETE | wc -l)" -eq 1
 YB=$(complete_backup "$Y")
 grep -qx 'my lab' "$YB/paths/ai/prompt_engineering/AGENTS.md"
 test ! -e "$YB/paths/ai/prompt_engineering/prompt_engineering"
-grep -qx 'my memory' "$YB/paths/.pi/agent/MEMORY.md"
+grep -qx 'my memory' "$YB/paths/.config/ai-memory/MEMORY.md"
 
 # Checkout paths with shell metacharacters work in the generated modify_ scripts.
 cp -R "$ROOT" "$TMP/re\$po 'dir"
