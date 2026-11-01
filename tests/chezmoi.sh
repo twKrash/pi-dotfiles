@@ -33,6 +33,8 @@ node "$ROOT/scripts/merge-json.mjs" settings "$TMP/settings-defaults.json" \
   <"$TMP/pi-settings.json" >"$TMP/merged-settings.json"
 cmp "$TMP/pi-settings.json" "$TMP/merged-settings.json"
 
+# Repo permission defaults stay portable: no absolute user-home paths or one machine's checkouts.
+if grep -nE '"(/home/|/Users/|~/code|~/pi")' "$ROOT/agent/permission-system.json"; then exit 1; fi
 # Permission merge only tightens, judged per surface (stdin = current file).
 perm() { printf '%s' "$1" | node "$ROOT/scripts/merge-json.mjs" permission "$ROOT/agent/permission-system.json" 2>/dev/null; }
 perm '{"permission":{"*":"allow"}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["rm -rf *"]!=="ask") throw new Error("ask not added under allow"); if ("*" in p.bash) throw new Error("repo allow added")'
