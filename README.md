@@ -46,7 +46,7 @@ Core is `instructions/core.md` (no harness or provider specifics). Local is the 
 
 - `home/dot_local/bin/executable_prompt-opt`, `prompt-opt-history.mjs`: the prompt optimizer CLI (`~/.local/bin`).
 - `home/ai/prompt_engineering/`: canonical prompt-engineering lab (`~/ai/prompt_engineering`, the `prompt-opt` default; `PROMPT_LAB_DIR` overrides at runtime).
-- `home/dot_pi/private_agent/private_extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
+- `home/dot_pi/private_agent/private_extensions/`: prompt-opt Pi adapter plus permission-system merge, RTK optimizer, and subagent settings.
 - `home/dot_pi/private_agent/skills/prompt-engineering/`: Pi skill generated from the lab (`SKILL.md` = Pi metadata + lab `AGENTS.md`; references included from the lab).
 - `instructions/code-standards.md`, `home/.chezmoitemplates/code-standards-skill.tmpl`: the `code-standards` skill (design, Python and module-size rules), installed as `SKILL.md` under `~/.pi/agent/skills/code-standards/`, `~/.claude/skills/code-standards/` and `~/.codex/skills/code-standards/` for the selected harnesses. Core only points to it, so the rules load on demand instead of in every session.
 - `home/dot_config/private_ai-memory/create_empty_MEMORY.md`: shared memory template (`~/.config/ai-memory/MEMORY.md`, used by every harness), created only when absent (an existing file, even an empty one, is kept). An old `~/.pi/agent/MEMORY.md` with real content stops `chezmoi apply` until it is merged into the shared file and deleted; the untouched template stub or a blank file does not block.
@@ -69,7 +69,7 @@ Provider profiles set scout to a low-cost model, worker to a mid-tier model, rev
 
 The package list follows the currently selected npm/Git extensions. `pi-session-inspector` uses its published package (`@twkrash/pi-session-inspector@1.5.3`), not a development checkout. Pi packages can execute code; review them before installing.
 
-The permission template follows `@gotgenes/pi-permission-system`'s config format. It keeps the plugin's allow-within-project default, denies secret-like `.env` files, asks before shell commands and external-directory access, and grants only explicit global tool paths. Reads and writes use separate external-directory rules. Debug and review logs are disabled to avoid retaining prompts and tool inputs.
+The permission defaults (`agent/permission-system.json`) follow `@gotgenes/pi-permission-system`'s config format and are installed in full on a fresh machine. After that they only ever tighten `~/.pi/agent/extensions/pi-permission-system/config.json` (`scripts/merge-json.mjs permission`): a missing repo `deny`/`ask` rule is added only if it is stricter than the nearest local catch-all (`ask` is never added next to a local `deny`); repo `allow` rules, arrays and every local value are left alone. A rule you delete locally can come back; allow rules added to the repo reach existing machines only by hand. It keeps the plugin's allow-within-project default, denies secret-like `.env` files, asks before shell commands and external-directory access, and grants only explicit global tool paths. Reads and writes use separate external-directory rules. Debug and review logs are disabled to avoid retaining prompts and tool inputs.
 
 ## Repository protection
 

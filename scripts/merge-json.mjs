@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 const [kind, sourcePath, profilePath] = process.argv.slice(2);
-if (!['settings', 'mcp', 'pi-goal', 'claude'].includes(kind) || !sourcePath) {
-  console.error('usage: merge-json.mjs settings|mcp|pi-goal|claude SOURCE [PROFILE] <current.json >merged.json');
+if (!['settings', 'mcp', 'pi-goal', 'claude', 'permission'].includes(kind) || !sourcePath) {
+  console.error('usage: merge-json.mjs settings|mcp|pi-goal|claude|permission SOURCE [PROFILE] <current.json >merged.json');
   process.exit(2);
 }
 const targetPath = 'current file';
@@ -30,6 +30,38 @@ function mergeDefaults(dst, src, prefix = '') {
     else if (value && typeof value === 'object' && !Array.isArray(value) && dst[key] && typeof dst[key] === 'object' && !Array.isArray(dst[key])) mergeDefaults(dst[key], value, label);
     else if (JSON.stringify(dst[key]) !== JSON.stringify(value)) {
       console.error(`pi-dotfiles: keeping local ${label}`);
+    }
+  }
+}
+
+// Permission policy merge. A fresh install (no current file) gets every repo default. An existing
+// file is only ever tightened: a missing repo rule is added only if it is stricter than what the local
+// policy already decides there (allow < ask < deny), judged by the nearest local catch-all "*". An "ask"
+// is also never added next to a local "deny" in the same surface, because the last matching rule wins.
+// Repo "allow" rules, arrays and every local value are left alone (a differing local value is reported).
+const RANK = { allow: 0, ask: 1, deny: 2 };
+function addMissing(dst, src, prefix = '') {
+  for (const [key, value] of Object.entries(src)) {
+    const label = prefix ? `${prefix}.${key}` : key;
+    if (!(key in dst)) dst[key] = value;
+    else if (value && typeof value === 'object' && !Array.isArray(value) && dst[key] && typeof dst[key] === 'object' && !Array.isArray(dst[key])) addMissing(dst[key], value, label);
+    else if (!isDeepStrictEqual(dst[key], value)) console.error(`pi-dotfiles: keeping local ${label}`);
+  }
+}
+function tightenOnly(dst, src, prefix = '', inherited = undefined) {
+  const own = typeof dst['*'] === 'string' ? dst['*'] : inherited;
+  const hasDeny = Object.values(dst).includes('deny');
+  for (const [key, value] of Object.entries(src)) {
+    const label = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'string') {
+      if (key in dst) {
+        if (dst[key] !== value) console.error(`pi-dotfiles: keeping local ${label}`);
+      } else if (value in RANK && RANK[value] > RANK[own ?? 'allow'] && !(value === 'ask' && hasDeny)) dst[key] = value;
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if (key in dst && (!dst[key] || typeof dst[key] !== 'object' || Array.isArray(dst[key]))) continue;
+      const child = key in dst ? dst[key] : {};
+      tightenOnly(child, value, label, own);
+      if (!(key in dst) && Object.keys(child).length) dst[key] = child;
     }
   }
 }
@@ -66,6 +98,9 @@ function mergeDefaults(dst, src, prefix = '') {
         }
       }
     }
+  } else if (kind === 'permission') {
+    if (currentText.trim()) tightenOnly(next, source);
+    else addMissing(next, source);
   } else if (kind === 'claude') {
     // Core instructions forbid harness auto-memory, so this key is enforced, not a default.
     if ('autoMemoryEnabled' in source) next.autoMemoryEnabled = source.autoMemoryEnabled;

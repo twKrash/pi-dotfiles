@@ -33,6 +33,13 @@ node "$ROOT/scripts/merge-json.mjs" settings "$TMP/settings-defaults.json" \
   <"$TMP/pi-settings.json" >"$TMP/merged-settings.json"
 cmp "$TMP/pi-settings.json" "$TMP/merged-settings.json"
 
+# Permission merge only tightens, judged per surface (stdin = current file).
+perm() { printf '%s' "$1" | node "$ROOT/scripts/merge-json.mjs" permission "$ROOT/agent/permission-system.json" 2>/dev/null; }
+perm '{"permission":{"*":"allow"}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["rm -rf *"]!=="ask") throw new Error("ask not added under allow"); if ("*" in p.bash) throw new Error("repo allow added")'
+perm '{"permission":{"*":"deny"}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash) throw new Error("ask added under catch-all deny")'
+perm '{"permission":{"bash":{"rm *":"deny"}}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission.bash; if ("rm -rf *" in p) throw new Error("ask added next to a local deny")'
+perm '' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["*"]!=="allow") throw new Error("fresh install incomplete")'
+
 # cz NAME ARGS...: chezmoi with a per-machine HOME, config, state, and destination under $TMP/NAME
 # (source: $SRC, default this checkout).
 cz() {
@@ -89,7 +96,7 @@ mkdir -p "$H/.claude"
 printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
-printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
+printf '%s\n' '{"piInfrastructureReadPaths":["/local/infra"],"permission":{"*":"deny","bash":{"my-local-cmd":"allow"}}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
 printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
 ln -s "$TMP/hybrid/linked.md" "$H/.pi/agent/AGENTS.md"
 node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" "$H/.pi/agent/pi-goal.json" <<'NODE'
@@ -137,6 +144,16 @@ mv "$TMP/local.md.aside" "$LOCAL"
 rm -r "$H/.config/pi-dotfiles"
 # Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state.
 cz hybrid apply --force
+# Permission policy only tightens an existing file: local rules survive, missing repo deny/ask rules are
+# added only where they tighten the local decision (not under a local catch-all deny), repo allow rules never.
+node - "$H/.pi/agent/extensions/pi-permission-system/config.json" <<'NODE'
+const live = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+if (live.permission['*'] !== 'deny') throw new Error('local catch-all changed');
+if (live.permission.bash['my-local-cmd'] !== 'allow') throw new Error('local bash rule lost');
+if (!live.piInfrastructureReadPaths.includes('/local/infra')) throw new Error('local path lost');
+if ('rm -rf *' in live.permission.bash) throw new Error('repo ask rule loosened a local deny');
+if ('*' in live.permission.bash) throw new Error('repo allow rule loosened local policy');
+NODE
 # Plain files are installed as-is; prompt-opt is executable.
 test -x "$H/.local/bin/prompt-opt"
 cmp "$ROOT/home/dot_local/bin/executable_prompt-opt" "$H/.local/bin/prompt-opt"
@@ -286,6 +303,13 @@ C="$TMP/home/home"
 cmp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$C/.config/ai-memory/MEMORY.md"
 expected_instructions codex "$TMP/home/local.md" >"$TMP/expected-codex.md"
 cmp "$TMP/expected-codex.md" "$C/.codex/AGENTS.md"
+# A fresh install gets the full repo permission defaults.
+node - "$C/.pi/agent/extensions/pi-permission-system/config.json" "$ROOT/agent/permission-system.json" <<'NODE'
+const fs = require('fs');
+const live = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const repo = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+if (JSON.stringify(live.permission) !== JSON.stringify(repo.permission)) throw new Error('fresh install differs from repo defaults');
+NODE
 grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
 grep -q 'task-specific handoff note' "$C/.codex/AGENTS.md"
 if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
