@@ -234,3 +234,7 @@ Keep durable project artifacts and secrets out of it, and do not modify unrelate
 ## Communication
 
 Be concise and task-focused. Keep shared artifacts proportional to the change and readable by humans. Read typing mistakes charitably and infer intent from context. Do not explain basic engineering concepts unless asked or they materially affect the decision.
+
+## Code standards
+
+Before writing, reviewing, or refactoring production code, load the `code-standards` skill.

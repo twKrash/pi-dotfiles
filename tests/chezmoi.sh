@@ -160,6 +160,18 @@ done
   cat "$ROOT/home/ai/prompt_engineering/AGENTS.md"
 } >"$TMP/expected-skill.md"
 cmp "$TMP/expected-skill.md" "$H/.pi/agent/skills/prompt-engineering/SKILL.md"
+# code-standards: one source, a skill per selected harness; instructions only point to it.
+{
+  printf '%s\n' '---' 'name: code-standards' \
+    'description: Design, Python and module-size standards; load before writing, reviewing, or refactoring production code.' '---' ''
+  cat "$ROOT/instructions/code-standards.md"
+} >"$TMP/expected-code-standards.md"
+cmp "$TMP/expected-code-standards.md" "$H/.pi/agent/skills/code-standards/SKILL.md"
+cmp "$TMP/expected-code-standards.md" "$H/.claude/skills/code-standards/SKILL.md"
+for file in .pi/agent/AGENTS.md .claude/CLAUDE.md; do
+  grep -Fq 'load the `code-standards` skill' "$H/$file"
+  if grep -q 'PEP 8' "$H/$file"; then exit 1; fi
+done
 # Each harness gets core + its own addendum + local rules; Pi rules stay out of CLAUDE.md.
 expected_instructions pi "$LOCAL" >"$TMP/expected-pi.md"
 cmp "$TMP/expected-pi.md" "$H/.pi/agent/AGENTS.md"
