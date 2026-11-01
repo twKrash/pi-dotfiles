@@ -54,6 +54,10 @@ perm_check '{"permission":{"*":"allow","bash":"allow"}}' 'p.bash === "allow"' 's
 # Directional surfaces inherit the bare key's catch-all and denies, which the plugin runs first.
 printf '%s\n' '{"permission":{"external_directory_read":{"~/x/*":"ask"}}}' >"$TMP/perm-dir.json"
 perm_check '{"permission":{"*":"allow","external_directory":{"*":"deny"}}}' '!p.external_directory_read' 'ask added under a bare-key deny' "$TMP/perm-dir.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow","~/x/*":"deny"}}}' '!p.external_directory_read' 'ask added after a bare-key deny' "$TMP/perm-dir.json"
+# Top-level mcp__* keys are moved by the plugin after every mcp rule, so they are never added.
+printf '%s\n' '{"permission":{"mcp__srv__*":"ask"}}' >"$TMP/perm-mcp.json"
+perm_check '{"permission":{"*":"allow","mcp":{"mcp__srv__danger":"deny"}}}' '!("mcp__srv__*" in p)' 'top-level mcp__ rule added' "$TMP/perm-mcp.json"
 perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow"}}}' 'p.external_directory_read["~/x/*"] === "ask"' 'ask not added under a bare-key allow' "$TMP/perm-dir.json"
 # An existing blank file means "ask everything" to the plugin: only stricter denies are added.
 perm_check '   ' '!("*" in p) && !p.bash && p.path["*.env"] === "deny"' 'blank existing file loosened'
@@ -163,8 +167,9 @@ if cz hybrid apply --force >"$TMP/legacy.log" 2>&1; then exit 1; fi
 grep -q 'move .*pi-dotfiles/local.md' "$TMP/legacy.log"
 mv "$TMP/local.md.aside" "$LOCAL"
 rm -r "$H/.config/pi-dotfiles"
-# Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state.
-cz hybrid apply --force
+# Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state. PI_DOTFILES_FRESH
+# exported by the caller must not leak into the permission merge and fill an existing file with defaults.
+(PI_DOTFILES_FRESH=1 && export PI_DOTFILES_FRESH && cz hybrid apply --force)
 # Permission policy only tightens an existing file: local rules survive, missing repo deny/ask rules are
 # added only where they tighten the local decision (not under a local catch-all deny), repo allow rules never.
 node - "$H/.pi/agent/extensions/pi-permission-system/config.json" <<'NODE'
