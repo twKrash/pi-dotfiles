@@ -11,6 +11,9 @@ mem() { python3 "$ROOT/home/dot_local/bin/executable_ai-mem" "$@"; }
 # code EXPECTED CMD...: CMD exits with EXPECTED.
 code() { want=$1; shift; set +e; "$@" >"$TMP/out" 2>"$TMP/err"; got=$?; set -e; [ "$got" -eq "$want" ] || { echo "exit $got, want $want: $*" >&2; cat "$TMP/err" >&2; exit 1; }; }
 
+# The cache rules live in --help (core instructions only point to it).
+mem --help | grep -q 'get-or-else'
+
 # Without a manifest every command fails closed.
 code 2 mem sources
 grep -q 'no manifest' "$TMP/err"

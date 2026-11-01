@@ -65,7 +65,7 @@ Do not create duplicate sources of truth; prefer updating an existing rule over 
 
 ### Static caches
 
-Caches of static service metadata (IDs, keys, hierarchy) are machine-specific; `ai-mem sources` lists them. Read a source's `doc` before first use, and access its files only through `ai-mem` (`get`, `find`, `ls`, `put`; exit 1 = miss). Reads are get-or-else: use a fresh hit; on a miss or a `_stale` record, call the service, then `put` the static result. After an approved create or change succeeds, `put` the resulting record. Never store content or dynamic data; the service wins on conflict. `put` only into sources that local rules approve for writes.
+Machine-specific caches of static service metadata are listed by `ai-mem sources`. Before first use, read `ai-mem --help` and the source's `doc`, and access the cache only through `ai-mem`. `put` only into sources that local rules approve for writes.
 
 ## Reusable scripts
 

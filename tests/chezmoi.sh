@@ -241,7 +241,12 @@ printf '%s\n' '{"sources": {"mine": {"dir": "/x"}}}' >"$H/.config/ai-memory/stru
 cz hybrid apply
 grep -qx 'my memory' "$H/.config/ai-memory/MEMORY.md"
 grep -q '"mine"' "$H/.config/ai-memory/structure.json"
-# The old Pi-only MEMORY.md must be merged into the shared one, never left unread.
+# The old Pi-only MEMORY.md must be merged into the shared one, never left unread;
+# an untouched stub or blank file has nothing to migrate and does not block.
+cp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$H/.pi/agent/MEMORY.md"
+cz hybrid apply
+printf '\n' >"$H/.pi/agent/MEMORY.md"
+cz hybrid apply
 printf '%s\n' 'old pi memory' >"$H/.pi/agent/MEMORY.md"
 if cz hybrid apply >"$TMP/legacy-memory.log" 2>&1; then exit 1; fi
 grep -q 'MEMORY.md is no longer read' "$TMP/legacy-memory.log"

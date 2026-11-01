@@ -15,6 +15,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DEFAULT_TTL = 90
+RULES = """rules:
+  Reads are get-or-else: use a fresh hit; on a miss (exit 1) or a _stale record, call the service,
+  then put the static result.
+  After an approved create or change succeeds, put the resulting record (server-assigned IDs exist only then).
+  Update = put the full record again with the same k. Never hand-edit or rewrite the files.
+  Store static metadata only (IDs, keys, hierarchy), never content or dynamic data. The service wins on conflict."""
 MANIFEST = Path(os.environ.get("AI_MEM_MANIFEST", Path.home() / ".config/ai-memory/structure.json")).expanduser()
 
 
@@ -90,7 +96,8 @@ def emit(recs) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Static agent memory caches. Exit 1 = miss, 2 = bad input.")
+    ap = argparse.ArgumentParser(description="Static agent memory caches. Exit 1 = miss, 2 = bad input.",
+                                 epilog=RULES, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("sources", help="list this machine's sources (name, purpose, doc, dir)")
     g = sub.add_parser("get", help="exact key lookup")
