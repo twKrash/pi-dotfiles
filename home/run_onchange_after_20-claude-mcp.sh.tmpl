@@ -1,0 +1,7 @@
+{{- /* Claude Code MCP servers from claude/mcp.json; reruns when that file changes. Empty (skipped) unless claude is selected. */ -}}
+{{- if has "claude" .harnesses -}}
+#!/bin/sh
+# claude/mcp.json hash: {{ include (joinPath .chezmoi.workingTree "claude/mcp.json") | sha256sum }}
+set -eu
+exec node {{ joinPath .chezmoi.workingTree "scripts/claude-mcp-sync.mjs" | shellQuote }} {{ joinPath .chezmoi.workingTree "claude/mcp.json" | shellQuote }}
+{{- end }}

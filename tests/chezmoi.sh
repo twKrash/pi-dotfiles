@@ -52,6 +52,24 @@ expected_instructions() {
   if [ -f "$(dirname -- "$2")/local.$1.md" ]; then printf '\n'; cat "$(dirname -- "$2")/local.$1.md"; fi
 }
 
+# A stub `claude` records MCP registrations; the real CLI must never run from tests.
+mkdir -p "$TMP/stub-bin"
+cat >"$TMP/stub-bin/claude" <<'STUB'
+#!/bin/sh
+case "$1 $2" in
+  "--version "*) echo stub ;;
+  "mcp get") grep -qx -- "$3" "$STUB_KNOWN" 2>/dev/null ;;
+  "mcp add-json") echo "$5" >>"$STUB_KNOWN"; echo "$5" >>"$STUB_ADDED" ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$TMP/stub-bin/claude"
+STUB_KNOWN="$TMP/stub-known"; STUB_ADDED="$TMP/stub-added"
+export STUB_KNOWN STUB_ADDED
+PATH="$TMP/stub-bin:$PATH"
+printf '%s\n' github >"$STUB_KNOWN"
+: >"$STUB_ADDED"
+
 # Hybrid Pi + Claude Code machine with the Claude subagent profile and a local overlay.
 init hybrid pi/claude claude
 grep -qx 'harnesses = \["pi", "claude"\]' "$TMP/hybrid/chezmoi.toml"
@@ -195,6 +213,9 @@ for (const key of Object.keys(repo.enabledPlugins)) if (!(key in live.enabledPlu
 for (const key of Object.keys(repo.extraKnownMarketplaces)) if (!(key in live.extraKnownMarketplaces)) throw new Error('missing marketplace ' + key);
 if (live.statusLine.command !== repo.statusLine.command) throw new Error('statusLine missing');
 NODE
+# Claude MCP servers are registered once; a server the machine already has is left alone.
+grep -qx context7 "$STUB_ADDED"
+if grep -qx github "$STUB_ADDED"; then exit 1; fi
 test -x "$H/.claude/statusline.sh"
 cmp "$ROOT/home/dot_claude/executable_statusline.sh" "$H/.claude/statusline.sh"
 test -z "$(cz hybrid diff)"
@@ -227,6 +248,8 @@ cmp "$ROOT/home/dot_pi/private_agent/private_extensions/subagent/config.json" "$
 # Pi + Codex machine with the Codex (OpenAI) subagent profile and no local overlay.
 init home pi/codex codex
 cz home apply
+# Without the claude harness nothing is registered.
+test "$(wc -l <"$STUB_ADDED")" -eq 1
 C="$TMP/home/home"
 cmp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$C/.config/ai-memory/MEMORY.md"
 expected_instructions codex "$TMP/home/local.md" >"$TMP/expected-codex.md"
