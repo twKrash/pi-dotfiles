@@ -34,35 +34,56 @@ function mergeDefaults(dst, src, prefix = '') {
   }
 }
 
-// Permission policy merge. A fresh install (no current file) gets every repo default. An existing
-// file is only ever tightened: a missing repo rule is added only if it is stricter than what the local
-// policy already decides there (allow < ask < deny), judged by the nearest local catch-all "*". An "ask"
-// is also never added next to a local "deny" in the same surface, because the last matching rule wins.
-// Repo "allow" rules, arrays and every local value are left alone (a differing local value is reported).
+// Permission policy merge (pi-permission-system semantics). A rule is "allow" | "ask" | "deny" or
+// {action, reason}; a surface is a rule or a pattern map; within a map the last matching rule wins and an
+// unmatched surface falls back to permission["*"] ("ask" when absent). A bare path/external_directory key
+// expands into its _read/_write keys, its rules running before theirs.
+// A fresh install (no live file) gets every repo default. An existing file is only ever tightened: a
+// missing repo deny/ask rule is added (appended, so it wins) only if it is stricter than what that
+// surface decides by default, and an "ask" never lands where a local deny could match before it.
+// Repo allow rules, string-vs-map mismatches, non-permission keys and every local value are left alone.
 const RANK = { allow: 0, ask: 1, deny: 2 };
-function addMissing(dst, src, prefix = '') {
-  for (const [key, value] of Object.entries(src)) {
-    const label = prefix ? `${prefix}.${key}` : key;
-    if (!(key in dst)) dst[key] = value;
-    else if (value && typeof value === 'object' && !Array.isArray(value) && dst[key] && typeof dst[key] === 'object' && !Array.isArray(dst[key])) addMissing(dst[key], value, label);
-    else if (!isDeepStrictEqual(dst[key], value)) console.error(`pi-dotfiles: keeping local ${label}`);
+const BARE = { path_read: 'path', path_write: 'path', external_directory_read: 'external_directory', external_directory_write: 'external_directory' };
+const isMap = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && !('action' in value);
+const action = (rule) => (rule && typeof rule === 'object' ? rule.action : rule);
+const hasDeny = (surface) => (isMap(surface) ? Object.values(surface).some((rule) => action(rule) === 'deny') : action(surface) === 'deny');
+// What a surface decides when none of its own patterns match.
+function fallbackOf(surface, fallback) {
+  if (!isMap(surface)) return action(surface);
+  return Object.hasOwn(surface, '*') ? action(surface['*']) : fallback;
+}
+// A rule may be added where `base` is the current decision and a local deny may match earlier (`denied`).
+function tightens(rule, base, denied) {
+  const wanted = action(rule);
+  if (!Object.hasOwn(RANK, wanted) || !Object.hasOwn(RANK, base)) return false;
+  return RANK[wanted] > RANK[base] && !(wanted === 'ask' && denied);
+}
+function tightenMap(local, repo, base, denied, label) {
+  const ownBase = fallbackOf(local, base);
+  const ownDenied = denied || hasDeny(local);
+  for (const [pattern, rule] of Object.entries(repo)) {
+    if (Object.hasOwn(local, pattern)) {
+      if (!isDeepStrictEqual(local[pattern], rule)) console.error(`pi-dotfiles: keeping local ${label}.${pattern}`);
+    } else if (tightens(rule, ownBase, ownDenied)) local[pattern] = rule;
   }
 }
-function tightenOnly(dst, src, prefix = '', inherited = undefined) {
-  const own = typeof dst['*'] === 'string' ? dst['*'] : inherited;
-  const hasDeny = Object.values(dst).includes('deny');
-  for (const [key, value] of Object.entries(src)) {
-    const label = prefix ? `${prefix}.${key}` : key;
-    if (typeof value === 'string') {
-      if (key in dst) {
-        if (dst[key] !== value) console.error(`pi-dotfiles: keeping local ${label}`);
-      } else if (value in RANK && RANK[value] > RANK[own ?? 'allow'] && !(value === 'ask' && hasDeny)) dst[key] = value;
-    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-      if (key in dst && (!dst[key] || typeof dst[key] !== 'object' || Array.isArray(dst[key]))) continue;
-      const child = key in dst ? dst[key] : {};
-      tightenOnly(child, value, label, own);
-      if (!(key in dst) && Object.keys(child).length) dst[key] = child;
-    }
+function tightenPermission(local, repo) {
+  const fallback = Object.hasOwn(local, '*') ? action(local['*']) : 'ask';
+  for (const [name, repoSurface] of Object.entries(repo)) {
+    const label = `permission.${name}`;
+    const bare = Object.hasOwn(local, BARE[name]) ? local[BARE[name]] : undefined;
+    const base = bare === undefined ? fallback : fallbackOf(bare, fallback);
+    const denied = bare !== undefined && hasDeny(bare);
+    if (!Object.hasOwn(local, name)) {
+      if (!isMap(repoSurface)) {
+        if (tightens(repoSurface, name === '*' ? 'ask' : base, denied)) local[name] = repoSurface;
+        continue;
+      }
+      const added = {};
+      tightenMap(added, repoSurface, base, denied, label);
+      if (Object.keys(added).length) local[name] = added;
+    } else if (isMap(local[name]) && isMap(repoSurface)) tightenMap(local[name], repoSurface, base, denied, label);
+    else if (!isDeepStrictEqual(local[name], repoSurface)) console.error(`pi-dotfiles: keeping local ${label}`);
   }
 }
 
@@ -99,8 +120,14 @@ function tightenOnly(dst, src, prefix = '', inherited = undefined) {
       }
     }
   } else if (kind === 'permission') {
-    if (currentText.trim()) tightenOnly(next, source);
-    else addMissing(next, source);
+    // Only a missing live file is fresh: the plugin reads an existing blank file as "ask everything".
+    if (process.env.PI_DOTFILES_FRESH === '1') mergeDefaults(next, source);
+    else if (next.permission !== undefined && !isMap(next.permission)) console.error('pi-dotfiles: keeping local permission');
+    else {
+      const permission = next.permission ?? {};
+      tightenPermission(permission, source.permission ?? {});
+      if (next.permission !== undefined || Object.keys(permission).length) next.permission = permission;
+    }
   } else if (kind === 'claude') {
     // Core instructions forbid harness auto-memory, so this key is enforced, not a default.
     if ('autoMemoryEnabled' in source) next.autoMemoryEnabled = source.autoMemoryEnabled;

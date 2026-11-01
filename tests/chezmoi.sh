@@ -35,12 +35,31 @@ cmp "$TMP/pi-settings.json" "$TMP/merged-settings.json"
 
 # Repo permission defaults stay portable: no absolute user-home paths or one machine's checkouts.
 if grep -nE '"(/home/|/Users/|~/code|~/pi")' "$ROOT/agent/permission-system.json"; then exit 1; fi
-# Permission merge only tightens, judged per surface (stdin = current file).
-perm() { printf '%s' "$1" | node "$ROOT/scripts/merge-json.mjs" permission "$ROOT/agent/permission-system.json" 2>/dev/null; }
-perm '{"permission":{"*":"allow"}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["rm -rf *"]!=="ask") throw new Error("ask not added under allow"); if ("*" in p.bash) throw new Error("repo allow added")'
-perm '{"permission":{"*":"deny"}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash) throw new Error("ask added under catch-all deny")'
-perm '{"permission":{"bash":{"rm *":"deny"}}}' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission.bash; if ("rm -rf *" in p) throw new Error("ask added next to a local deny")'
-perm '' | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["*"]!=="allow") throw new Error("fresh install incomplete")'
+# Permission merge only tightens, judged per surface (stdin = current file, $2 = repo defaults).
+# perm_check CURRENT CONDITION MESSAGE [REPO]: merge, then CONDITION (JS over `p`, the merged permission) must hold.
+perm_check() {
+  printf '%s' "$1" | node "$ROOT/scripts/merge-json.mjs" permission "${4:-$ROOT/agent/permission-system.json}" 2>/dev/null |
+    node -e 'const p = JSON.parse(require("fs").readFileSync(0, "utf8")).permission ?? {}; if (!(eval(process.argv[1]))) throw new Error(process.argv[2])' "$2" "$3"
+}
+perm_check '{"permission":{"*":"allow"}}' 'p.bash["rm -rf *"] === "ask" && !("*" in p.bash)' 'ask not added under allow, or repo allow added'
+# Rules join an existing local surface after its catch-all, so they win.
+perm_check '{"permission":{"*":"allow","bash":{"*":"allow"}}}' 'Object.keys(p.bash)[0] === "*" && p.bash["sudo *"] === "ask"' 'ask not added to an existing surface'
+perm_check '{"permission":{"*":"deny"}}' '!p.bash' 'ask added under catch-all deny'
+perm_check '{"permission":{"*":"allow","bash":{"rm *":"deny"}}}' '!("rm -rf *" in p.bash)' 'ask added after a local deny'
+# Object-form denies count as denies (the plugin's {action, reason} rule).
+perm_check '{"permission":{"*":"allow","bash":{"*":"allow","git push --force *":{"action":"deny","reason":"r"}}}}' '!("git push *" in p.bash)' 'ask added after an object deny'
+perm_check '{"permission":{"*":"allow","bash":{"*":{"action":"deny","reason":"r"}}}}' 'Object.keys(p.bash).length === 1' 'ask added under an object catch-all deny'
+# A local string surface is a local value: kept as is.
+perm_check '{"permission":{"*":"allow","bash":"allow"}}' 'p.bash === "allow"' 'string surface changed'
+# Directional surfaces inherit the bare key's catch-all and denies, which the plugin runs first.
+printf '%s\n' '{"permission":{"external_directory_read":{"~/x/*":"ask"}}}' >"$TMP/perm-dir.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"deny"}}}' '!p.external_directory_read' 'ask added under a bare-key deny' "$TMP/perm-dir.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow"}}}' 'p.external_directory_read["~/x/*"] === "ask"' 'ask not added under a bare-key allow' "$TMP/perm-dir.json"
+# An existing blank file means "ask everything" to the plugin: only stricter denies are added.
+perm_check '   ' '!("*" in p) && !p.bash && p.path["*.env"] === "deny"' 'blank existing file loosened'
+# Only a missing live file (PI_DOTFILES_FRESH from the template) gets the full defaults.
+printf '' | PI_DOTFILES_FRESH=1 node "$ROOT/scripts/merge-json.mjs" permission "$ROOT/agent/permission-system.json" |
+  node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["*"]!=="allow") throw new Error("fresh install incomplete")'
 
 # cz NAME ARGS...: chezmoi with a per-machine HOME, config, state, and destination under $TMP/NAME
 # (source: $SRC, default this checkout).

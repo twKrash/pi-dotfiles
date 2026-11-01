@@ -1,3 +1,4 @@
 #!/bin/sh
 # Add missing repo permission rules to the live file, stdin -> stdout. Local rules and values are never changed or removed.
-exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | shellQuote }} permission {{ joinPath .chezmoi.workingTree "agent/permission-system.json" | shellQuote }}
+# Full defaults only when the live file does not exist yet; an existing (even blank) file is only tightened.
+{{ if not (stat .chezmoi.targetFile) }}PI_DOTFILES_FRESH=1 {{ end }}exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | shellQuote }} permission {{ joinPath .chezmoi.workingTree "agent/permission-system.json" | shellQuote }}
