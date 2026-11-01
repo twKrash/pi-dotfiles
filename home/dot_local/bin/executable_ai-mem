@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Static agent memory caches: JSONL files, newest line per key wins.
+
+Sources are machine-local and listed in ~/.config/ai-memory/structure.json
+(AI_MEM_MANIFEST overrides):
+
+  {"sources": {"<name>": {"dir": "~/abs/path", "doc": "~/path/README.md",
+                          "purpose": "...", "ttl": {"<file>": days},
+                          "defaultTtl": days}}}
+
+A file name is "<source>/<file>": "atlassian/jira/teams" reads
+<dir>/jira/teams.jsonl. Exit codes: 0 ok, 1 miss, 2 bad input or a broken
+manifest or cache file.
+"""
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import NoReturn, Optional
+
+DEFAULT_TTL = 90
+MAX_TTL = 36500  # days; keeps timedelta arithmetic in range
+MANIFEST = Path(
+    os.environ.get("AI_MEM_MANIFEST")
+    or Path.home() / ".config/ai-memory/structure.json"
+).expanduser()
+RULES = """rules:
+  Reads are get-or-else: use a fresh hit; on a miss (exit 1) or a _stale
+  record, call the service, then put the static result if local rules
+  approve writes to that source.
+  After an approved create or change succeeds, put the resulting record
+  (server-assigned IDs exist only then), under the same condition.
+  Update = put the full record again with the same k. Never hand-edit or
+  rewrite the files.
+  Store static metadata only (IDs, keys, hierarchy), never content or
+  dynamic data. The service wins on conflict.
+  Exit 2 means bad input or a broken manifest or cache: report it, never
+  treat it as a miss."""
+
+
+def fail(message: str) -> NoReturn:
+    print(f"ai-mem: {message}", file=sys.stderr)
+    sys.exit(2)  # distinct from exit 1 = miss
+
+
+def read_text(path: Path) -> Optional[str]:
+    """File contents, or None if absent; other errors exit 2, never 1."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as error:
+        fail(f"cannot read {path}: {error}")
+
+
+def reject_constant(name: str) -> NoReturn:
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def parse_json(text: str) -> object:
+    """Strict JSON that can be written back as UTF-8; else ValueError.
+
+    Rejects NaN/Infinity, deep nesting and lone surrogates ("\\ud800"),
+    which json accepts but UTF-8 output cannot encode.
+    """
+    try:
+        value = json.loads(text, parse_constant=reject_constant)
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
+    return value  # UnicodeEncodeError is a ValueError and propagates
+
+
+def dumps(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False, separators=(",", ":"),
+                      allow_nan=False)
+
+
+def is_key(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def is_ttl(value: object) -> bool:
+    return type(value) is int and 1 <= value <= MAX_TTL
+
+
+def check_source(name: str, source: object) -> None:
+    def bad(reason: str) -> NoReturn:
+        fail(f'bad manifest {MANIFEST}: source "{name}" {reason}')
+
+    if not name or "/" in name:
+        bad("needs a non-empty name without '/'")
+    if not isinstance(source, dict):
+        bad("must be an object")
+    directory = source.get("dir")
+    if not isinstance(directory, str):
+        bad('needs a "dir" string')
+    if not Path(directory).expanduser().is_absolute():
+        bad('"dir" must be an absolute path')
+    for field in ("doc", "purpose"):
+        if not isinstance(source.get(field, ""), str):
+            bad(f'"{field}" must be a string')
+    ttl = source.get("ttl", {})
+    if not isinstance(ttl, dict):
+        bad('"ttl" must be an object')
+    for days in [source.get("defaultTtl", DEFAULT_TTL), *ttl.values()]:
+        if not is_ttl(days):
+            bad(f"TTLs must be whole days from 1 to {MAX_TTL}")
+
+
+def load_sources() -> dict:
+    text = read_text(MANIFEST)
+    if text is None:
+        fail(f"no manifest at {MANIFEST}")
+    try:
+        manifest = parse_json(text)
+    except ValueError as error:
+        fail(f"bad manifest {MANIFEST}: {error}")
+    if not isinstance(manifest, dict):
+        fail(f"bad manifest {MANIFEST}: must be a JSON object")
+    sources = manifest.get("sources")
+    if not isinstance(sources, dict):
+        fail(f'bad manifest {MANIFEST}: "sources" must be an object')
+    for name, source in sources.items():
+        check_source(name, source)
+    return sources
+
+
+def resolve(name: str) -> tuple[Path, int]:
+    """JSONL path and TTL in days for "<source>/<file>".
+
+    The path never escapes the source dir; the TTL is looked up by the
+    name as given, normalised as text ("jira//teams" and "./jira/teams"
+    match "jira/teams"; symlinks are not followed for the lookup).
+    """
+    sources = load_sources()
+    source_name, _, relative = name.removesuffix(".jsonl").partition("/")
+    if source_name not in sources or not relative:
+        known = ", ".join(sources) or "none"
+        fail(f"bad file name: {name} "
+             f"(must be <source>/<file>, sources: {known})")
+    source = sources[source_name]
+    try:
+        root = Path(source["dir"]).expanduser().resolve()
+        if not root.is_dir():
+            fail(f"source {source_name}: {root} is not a directory")
+        path = (root / f"{relative}.jsonl").resolve()
+    except (OSError, RuntimeError) as error:  # permissions, symlink loops
+        fail(f"cannot resolve {name}: {error}")
+    if root not in path.parents:
+        fail(f"bad file name: {name}")
+    file_key = os.path.normpath(relative)
+    default = source.get("defaultTtl", DEFAULT_TTL)
+    return path, source.get("ttl", {}).get(file_key, default)
+
+
+def parse_record(line: str) -> Optional[dict]:
+    """A record is a JSON object with a non-empty string "k"; else None."""
+    try:
+        record = parse_json(line)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or not is_key(record.get("k")):
+        return None
+    return record
+
+
+def latest(path: Path) -> dict:
+    """All valid records of a file, newest line per key wins."""
+    records: dict = {}
+    text = read_text(path)
+    if text is None:
+        return records
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        record = parse_record(line)
+        if record is None:
+            print(f"skip bad line {path.name}:{number}", file=sys.stderr)
+            continue
+        records.pop(record["k"], None)  # re-insert so order = recency
+        records[record["k"]] = record
+    return records
+
+
+def is_fresh(record: dict, ttl_days: int) -> bool:
+    """A missing, malformed, timezone-less or future ts counts as stale."""
+    stamp = record.get("ts")
+    if not isinstance(stamp, str):
+        return False
+    try:
+        written = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if written.tzinfo is None:
+        return False
+    age = datetime.now(timezone.utc) - written
+    return timedelta(0) <= age <= timedelta(days=ttl_days)
+
+
+def mark(record: dict, ttl_days: int) -> dict:
+    if is_fresh(record, ttl_days):
+        return record
+    return {**record, "_stale": True}
+
+
+def emit(records) -> None:
+    for record in records:
+        print(dumps(record))
+
+
+def put(path: Path, text: str) -> dict:
+    try:
+        record = parse_json(text)
+    except ValueError as error:
+        fail(f"record is not valid JSON: {error}")
+    if not isinstance(record, dict) or not is_key(record.get("k")):
+        fail("record must be a JSON object with a non-empty string 'k'")
+    record.pop("_stale", None)
+    record["ts"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # One small append per record: safe enough for parallel agents.
+        with open(path, "a", encoding="utf-8") as cache:
+            cache.write(dumps(record) + "\n")
+    except OSError as error:
+        fail(f"cannot write {path}: {error}")
+    return record
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Static agent memory caches. "
+                    "Exit 1 = miss, 2 = bad input.",
+        epilog=RULES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "sources", help="list this machine's sources (name, purpose, doc, dir)"
+    )
+    get_command = commands.add_parser("get", help="exact key lookup")
+    get_command.add_argument("file")
+    get_command.add_argument("key")
+    find_command = commands.add_parser(
+        "find", help="case-insensitive text search over latest records"
+    )
+    find_command.add_argument("file")
+    find_command.add_argument("text", nargs="+",
+                              help="all terms must match")
+    list_command = commands.add_parser("ls", help="all latest records")
+    list_command.add_argument("file")
+    put_command = commands.add_parser(
+        "put",
+        help="append a record (JSON object with k); ts is set automatically",
+    )
+    put_command.add_argument("file")
+    put_command.add_argument("json")
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "sources":
+        emit({"name": name, "purpose": source.get("purpose", ""),
+              "doc": source.get("doc", ""), "dir": source["dir"]}
+             for name, source in load_sources().items())
+        return 0
+    path, ttl_days = resolve(args.file)
+    if args.command == "get":
+        record = latest(path).get(args.key)
+        if record is None:
+            return 1
+        emit([mark(record, ttl_days)])
+    elif args.command == "find":
+        terms = [term.lower() for term in args.text]
+        hits = [mark(record, ttl_days)
+                for record in latest(path).values()
+                if all(term in dumps(record).lower() for term in terms)]
+        emit(hits)
+        return 0 if hits else 1
+    elif args.command == "ls":
+        emit(mark(record, ttl_days) for record in latest(path).values())
+    else:
+        emit([put(path, args.json)])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -26,7 +26,7 @@ chezmoi apply                                          # asks before replacing a
 | Update | `git pull --ff-only && chezmoi diff && chezmoi apply` |
 | A managed file was edited locally | `chezmoi apply` asks (diff / overwrite / skip); `chezmoi merge <file>` opens a 3-way merge |
 | Copy a local edit back into the repo | `chezmoi re-add <file>` (plain files), then commit |
-| Machine-only instructions | edit `~/.config/chezmoi/local.md`, then `chezmoi apply` |
+| Machine-only instructions | edit `~/.config/chezmoi/local.md` (all harnesses) or `local.<harness>.md` (one harness), then `chezmoi apply` |
 
 ## Harnesses
 
@@ -34,11 +34,11 @@ Each selected harness gets its own generated global instructions file; files of 
 
 | Harness | Generated file | Contents |
 |---|---|---|
-| `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local |
-| `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local |
-| `codex` | `~/.codex/AGENTS.md` | core + Codex addendum + local |
+| `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local + `local.pi.md` |
+| `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local + `local.claude.md` |
+| `codex` | `~/.codex/AGENTS.md` | core + Codex addendum + local + `local.codex.md` |
 
-Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
+Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Rules for a single harness go in `~/.config/chezmoi/local.<harness>.md` (`local.pi.md`, `local.claude.md`, `local.codex.md`), appended after `local.md` for that harness only. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
 
 ## Layout
 
@@ -48,13 +48,16 @@ Core is `instructions/core.md` (no harness or provider specifics). Local is the 
 - `home/ai/prompt_engineering/`: canonical prompt-engineering lab (`~/ai/prompt_engineering`, the `prompt-opt` default; `PROMPT_LAB_DIR` overrides at runtime).
 - `home/dot_pi/private_agent/private_extensions/`: prompt-opt Pi adapter plus permission-system, RTK optimizer, and subagent settings.
 - `home/dot_pi/private_agent/skills/prompt-engineering/`: Pi skill generated from the lab (`SKILL.md` = Pi metadata + lab `AGENTS.md`; references included from the lab).
-- `home/dot_pi/private_agent/create_empty_MEMORY.md`: memory template, created only when absent (an existing file, even an empty one, is kept).
+- `instructions/code-standards.md`, `home/.chezmoitemplates/code-standards-skill.tmpl`: the `code-standards` skill (design, Python and module-size rules), installed as `SKILL.md` under `~/.pi/agent/skills/code-standards/`, `~/.claude/skills/code-standards/` and `~/.codex/skills/code-standards/` for the selected harnesses. Core only points to it, so the rules load on demand instead of in every session.
+- `home/dot_config/private_ai-memory/create_empty_MEMORY.md`: shared memory template (`~/.config/ai-memory/MEMORY.md`, used by every harness), created only when absent (an existing file, even an empty one, is kept). An old `~/.pi/agent/MEMORY.md` with real content stops `chezmoi apply` until it is merged into the shared file and deleted; the untouched template stub or a blank file does not block.
+- `home/dot_local/bin/executable_ai-mem`, `home/dot_config/private_ai-memory/create_structure.json`: `ai-mem` (Python 3, standard library only) reads and appends static metadata caches (JSONL, newest line per key wins, per-file TTL marks `_stale` records). Which caches exist is machine-local: `~/.config/ai-memory/structure.json` maps each source to its directory, schema doc, purpose and TTLs, and is created empty once, never overwritten. Example: `{"sources": {"atlassian": {"dir": "~/work/memory/atlassian", "doc": "~/work/memory/README.md", "purpose": "Jira/Confluence IDs", "ttl": {"jira/teams": 30}, "defaultTtl": 90}}}`. `ai-mem sources` lists them; `ai-mem get atlassian/jira/teams <key>` reads `<dir>/jira/teams.jsonl`. A miss exits 1; anything else that goes wrong exits 2 (bad input, unknown sources, paths outside a source, and manifests or cache files that are malformed, unreadable or not UTF-8), so a broken cache never reads as a miss. Cache lines that are not a JSON object with a string `k` are skipped with a note; a `ts` that is missing, malformed, timezone-less or in the future counts as stale. Manifest `dir` must be absolute (after `~`), and TTLs are whole days from 1 to 36500. Usage rules are in `ai-mem --help`. Write approval per source belongs in local rules, not the manifest.
 - `home/dot_pi/private_agent/modify_settings.json.tmpl`, `modify_mcp.json.tmpl`: merge repo defaults into the live files via `scripts/merge-json.mjs` (stdin → stdout). Unrelated settings, extra packages, other MCP servers, and keys Pi writes itself are kept; conflicting local values win and are reported. The `claude`/`codex` profile replaces only subagent model/thinking fields; `none` leaves models untouched. The Claude profile adds `npm:pi-claude-agent-sdk` (packages are not installed; use `pi update --extensions` after review).
 - `home/.chezmoitemplates/instructions.tmpl`: composes the per-harness instruction files.
 - `instructions/`: core and per-harness instruction sources.
 - `agent/settings.json`, `agent/mcp.json`, `agent/providers/`: merge inputs (package list and portable `pi-subagents` role defaults; Context7 only, no personal MCP headers; opt-in `codex` and `claude` subagent profiles).
+- `claude/settings.json`, `home/dot_claude/modify_private_settings.json.tmpl`, `home/dot_claude/executable_statusline.sh`: Claude Code plugins (`extraKnownMarketplaces`, `enabledPlugins`) and the status line. Defaults are merged into `~/.claude/settings.json` by `scripts/merge-json.mjs claude`: missing keys are added, local values win and are reported, and permissions and hooks are never touched. The exception is `autoMemoryEnabled: false`, which is enforced because core instructions forbid harness auto-memory. Plugins are not installed by the merge (run `claude plugin install <name>@<marketplace>` or let Claude Code offer them) and run code, so review them before installing. `claude/mcp.json` lists the user-scope MCP servers (Context7, GitHub); `home/run_onchange_after_20-claude-mcp.sh.tmpl` runs `scripts/claude-mcp-sync.mjs`, which registers missing servers through `claude mcp add-json --scope user` and leaves existing ones alone (it skips when the `claude` CLI is absent, and reruns once `claude` is on `PATH` because the script embeds its path; it never edits `~/.claude.json` directly). The GitHub server fetches its token from `gh auth token` at connect time, so no secret is stored. Add a plugin by listing it in `claude/settings.json`; the Claude addendum tells the agent to do that when asked to install one.
 - Graphify skill: not vendored. Install it with `graphify install --platform pi` (and `--platform claude`) and re-run after upgrading graphify.
-- `tests/`: `sh tests/prompt-opt.sh` and `sh tests/chezmoi.sh` (applies into throwaway homes; never touches `~`).
+- `tests/`: `sh tests/prompt-opt.sh`, `sh tests/ai-mem.sh` and `sh tests/chezmoi.sh` (applies into throwaway homes; never touches `~`).
 
 ### Prompt optimizer
 

@@ -4,14 +4,13 @@ This section only specializes the instructions above for Pi.
 
 ## Locations
 
-- Global memory: `~/.pi/agent/MEMORY.md`.
 - Scratch space: `~/.pi/tmp/`. Never put project worktrees there.
 
 ## Skills
 
 Install the Graphify skill with `graphify install --platform pi` and invoke it as `/skill:graphify`.
 
-## Delegation
+## Delegation (Pi)
 
 Use `pi-subagents` for delegated agent work. Do not use Herdr agent spawns for implementation, review, or other delegation unless the user explicitly requests Herdr or `pi-subagents` is unavailable.
 

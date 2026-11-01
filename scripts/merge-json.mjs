@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 const [kind, sourcePath, profilePath] = process.argv.slice(2);
-if (!['settings', 'mcp', 'pi-goal'].includes(kind) || !sourcePath) {
-  console.error('usage: merge-json.mjs settings|mcp|pi-goal SOURCE [PROFILE] <current.json >merged.json');
+if (!['settings', 'mcp', 'pi-goal', 'claude'].includes(kind) || !sourcePath) {
+  console.error('usage: merge-json.mjs settings|mcp|pi-goal|claude SOURCE [PROFILE] <current.json >merged.json');
   process.exit(2);
 }
 const targetPath = 'current file';
@@ -66,6 +66,11 @@ function mergeDefaults(dst, src, prefix = '') {
         }
       }
     }
+  } else if (kind === 'claude') {
+    // Core instructions forbid harness auto-memory, so this key is enforced, not a default.
+    if ('autoMemoryEnabled' in source) next.autoMemoryEnabled = source.autoMemoryEnabled;
+    // Add missing repo defaults (plugins, marketplaces, status line); local values win.
+    mergeDefaults(next, source);
   } else if (kind === 'pi-goal') {
     // Enforce repo keys (rpc.enabled) and keep every other local setting and unknown field.
     for (const [key, value] of Object.entries(source)) {
