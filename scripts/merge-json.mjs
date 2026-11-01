@@ -67,6 +67,8 @@ function mergeDefaults(dst, src, prefix = '') {
       }
     }
   } else if (kind === 'claude') {
+    // Core instructions forbid harness auto-memory, so this key is enforced, not a default.
+    if ('autoMemoryEnabled' in source) next.autoMemoryEnabled = source.autoMemoryEnabled;
     // Add missing repo defaults (plugins, marketplaces, status line); local values win.
     mergeDefaults(next, source);
   } else if (kind === 'pi-goal') {

@@ -83,9 +83,10 @@ H="$TMP/hybrid/home"
 # an existing empty MEMORY.md is kept (chezmoi removes empty targets unless marked empty_).
 mkdir -p "$H/.pi/agent/extensions/pi-permission-system"
 mkdir -p "$H/.config/ai-memory"
-# Existing Claude Code settings: local permissions and a local plugin survive the merge.
+# Existing Claude Code settings: local permissions and a local plugin survive the merge;
+# local auto-memory is turned off anyway (enforced, not a default).
 mkdir -p "$H/.claude"
-printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false}}' >"$H/.claude/settings.json"
+printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
@@ -241,6 +242,9 @@ printf '%s\n' '{"sources": {"mine": {"dir": "/x"}}}' >"$H/.config/ai-memory/stru
 cz hybrid apply
 grep -qx 'my memory' "$H/.config/ai-memory/MEMORY.md"
 grep -q '"mine"' "$H/.config/ai-memory/structure.json"
+# The MCP sync script embeds the claude CLI path, so installing claude later reruns it.
+cz hybrid execute-template "$(cat "$ROOT/home/run_onchange_after_20-claude-mcp.sh.tmpl")" |
+  grep -Fq "# claude CLI: $TMP/stub-bin/claude "
 # The old Pi-only MEMORY.md must be merged into the shared one, never left unread;
 # an untouched stub or blank file has nothing to migrate and does not block.
 cp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$H/.pi/agent/MEMORY.md"
@@ -285,6 +289,9 @@ cmp "$TMP/expected-codex.md" "$C/.codex/AGENTS.md"
 grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
 grep -q 'task-specific handoff note' "$C/.codex/AGENTS.md"
 if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
+# Codex gets the code-standards skill its instructions point to.
+grep -Fq 'load the `code-standards` skill' "$C/.codex/AGENTS.md"
+cmp "$TMP/expected-code-standards.md" "$C/.codex/skills/code-standards/SKILL.md"
 test ! -e "$C/.claude"
 node - "$C/.pi/agent/settings.json" <<'NODE'
 const s = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
