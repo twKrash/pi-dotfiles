@@ -54,7 +54,7 @@
       "~/.agents/*": "allow",
       "~/.codex/plugins/*": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
-      "~/.config/ai-memory/MEMORY.md": "allow"
+      "~/.config/ai-memory/*": "allow"
     },
     "external_directory_write": {
       "/tmp/*": "allow",

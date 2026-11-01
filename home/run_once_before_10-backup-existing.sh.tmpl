@@ -18,7 +18,7 @@ save() { # save KIND REL: copy $dest/REL to $backup/KIND/REL, never following RE
   mkdir -p "$backup/$1/$(dirname "$2")"
   cp -RP "$dest/$2" "$backup/$1/$2"
 }
-for rel in .pi/agent/AGENTS.md .pi/agent/settings.json .pi/agent/mcp.json .pi/agent/pi-goal.json .config/ai-memory/MEMORY.md .pi/agent/extensions .pi/agent/skills/prompt-engineering .pi/agent/skills/code-standards .claude/CLAUDE.md .claude/settings.json .claude/statusline.sh .claude/skills/code-standards .codex/AGENTS.md .local/bin/prompt-opt .local/bin/prompt-opt-history.mjs ai/prompt_engineering; do
+for rel in .pi/agent/AGENTS.md .pi/agent/settings.json .pi/agent/mcp.json .pi/agent/pi-goal.json .config/ai-memory/MEMORY.md .config/ai-memory/structure.json .pi/agent/extensions .pi/agent/skills/prompt-engineering .pi/agent/skills/code-standards .claude/CLAUDE.md .claude/settings.json .claude/statusline.sh .claude/skills/code-standards .codex/AGENTS.md .local/bin/prompt-opt .local/bin/prompt-opt-history.mjs .local/bin/ai-mem ai/prompt_engineering; do
   top=
   parent=$(dirname "$rel")
   while [ "$parent" != . ]; do

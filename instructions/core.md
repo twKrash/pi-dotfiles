@@ -44,7 +44,7 @@ Approval applies only to the specific action approved. Delegation or automation 
 
 ## Memory discipline
 
-The global `MEMORY.md` is `~/.config/ai-memory/MEMORY.md`, shared by every harness. It stores durable cross-session facts, preferences, and context. Treat it as read-only unless the user approves the exact change; never write durable memory anywhere else, including a harness's own auto-memory.
+The global `MEMORY.md` is `~/.config/ai-memory/MEMORY.md`, shared by every harness. It stores durable cross-session facts, preferences, and context. Treat it as read-only unless the user approves the exact change; never write durable memory anywhere else, including a harness's own auto-memory, except the static caches below.
 
 Consult it when prior decisions or preferences may materially affect the task, but prefer canonical project sources when available.
 
@@ -63,9 +63,13 @@ Do not silently turn every correction into permanent memory or policy. When a co
 
 Do not create duplicate sources of truth; prefer updating an existing rule over adding an overlapping one.
 
+### Static caches
+
+Caches of static service metadata (IDs, keys, hierarchy) are machine-specific; `ai-mem sources` lists them. Read a source's `doc` before first use, and access its files only through `ai-mem` (`get`, `find`, `ls`, `put`; exit 1 = miss). Reads are get-or-else: use a fresh hit; on a miss or a `_stale` record, call the service, then `put` the static result. After an approved create or change succeeds, `put` the resulting record. Never store content or dynamic data; the service wins on conflict. `put` only into sources that local rules approve for writes.
+
 ## Reusable scripts
 
-Before writing a script to perform an action, read the "Reusable scripts" section of `MEMORY.md`. If it names a directory, search it (for example, `grep -rH '^# purpose:' <dir>`) and reuse or extend a match. Save a new script there only if it is parameterizable and likely to recur; keep one-offs in scratch space.
+Before writing a script to perform an action, check whether local rules or `MEMORY.md` name a reusable-scripts directory. If one does, search it (for example, `grep -rH '^# purpose:' <dir>`) and reuse or extend a match. Save a new script there only if it is parameterizable and likely to recur; keep one-offs in scratch space.
 
 ## Delegation
 

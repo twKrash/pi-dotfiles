@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Static agent memory caches (JSONL, last-line-wins, per-file TTL); records as JSON lines on stdout.
+
+Sources are machine-local and listed in ~/.config/ai-memory/structure.json (AI_MEM_MANIFEST overrides):
+  {"sources": {"<name>": {"dir": "~/path", "doc": "~/path/README.md", "purpose": "...",
+                          "ttl": {"<file>": days}, "defaultTtl": days}}}
+A file name is "<source>/<file>", e.g. "atlassian/jira/teams" -> <dir>/jira/teams.jsonl.
+Exit codes: 0 ok, 1 miss, 2 bad usage, manifest or file name.
+"""
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+DEFAULT_TTL = 90
+MANIFEST = Path(os.environ.get("AI_MEM_MANIFEST", Path.home() / ".config/ai-memory/structure.json")).expanduser()
+
+
+def fail(msg: str):
+    print(f"ai-mem: {msg}", file=sys.stderr)
+    sys.exit(2)  # distinct from exit 1 = miss
+
+
+def load_sources() -> dict[str, dict]:
+    try:
+        sources = json.loads(MANIFEST.read_text()).get("sources")
+    except FileNotFoundError:
+        fail(f"no manifest at {MANIFEST}")
+    except (json.JSONDecodeError, AttributeError) as e:
+        fail(f"bad manifest {MANIFEST}: {e}")
+    if not isinstance(sources, dict):
+        fail(f'bad manifest {MANIFEST}: "sources" must be an object')
+    for name, src in sources.items():
+        ok = (isinstance(src, dict) and isinstance(src.get("dir"), str)
+              and isinstance(src.get("ttl", {}), dict)
+              and all(isinstance(v, int) for v in [src.get("defaultTtl", DEFAULT_TTL), *src.get("ttl", {}).values()]))
+        if "/" in name or not ok:
+            fail(f'bad manifest {MANIFEST}: source "{name}" needs a "dir" string and integer TTLs')
+    return sources
+
+
+def resolve(name: str) -> tuple[Path, int]:
+    """JSONL path and TTL in days for "<source>/<file>"; the path never escapes the source dir."""
+    sources = load_sources()
+    source, _, rel = name.removesuffix(".jsonl").partition("/")
+    if source not in sources or not rel:
+        fail(f"bad file name: {name} (must be <source>/<file>, sources: {', '.join(sources) or 'none'})")
+    src = sources[source]
+    root = Path(src["dir"]).expanduser().resolve()
+    if not root.is_dir():
+        fail(f"source {source}: {root} is not a directory")
+    p = (root / f"{rel}.jsonl").resolve()
+    if root not in p.parents:
+        fail(f"bad file name: {name}")
+    return p, src.get("ttl", {}).get(rel, src.get("defaultTtl", DEFAULT_TTL))
+
+
+def latest(p: Path) -> dict[str, dict]:
+    """All records of a file, newest line per key wins."""
+    out: dict[str, dict] = {}
+    if not p.exists():
+        return out
+    for n, line in enumerate(p.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"skip bad line {p.name}:{n}", file=sys.stderr)
+            continue
+        out.pop(rec.get("k"), None)  # re-insert so order = recency
+        out[rec.get("k")] = rec
+    return out
+
+
+def mark(ttl: int, rec: dict) -> dict:
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(rec["ts"].replace("Z", "+00:00"))
+        stale = age > timedelta(days=ttl)
+    except (KeyError, ValueError, AttributeError):
+        stale = True
+    return {**rec, "_stale": True} if stale else rec
+
+
+def emit(recs) -> None:
+    for r in recs:
+        print(json.dumps(r, ensure_ascii=False, separators=(",", ":")))
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Static agent memory caches. Exit 1 = miss, 2 = bad input.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("sources", help="list this machine's sources (name, purpose, doc, dir)")
+    g = sub.add_parser("get", help="exact key lookup")
+    g.add_argument("file"); g.add_argument("key")
+    f = sub.add_parser("find", help="case-insensitive text search over latest records")
+    f.add_argument("file"); f.add_argument("text", nargs="+", help="all terms must match")
+    l = sub.add_parser("ls", help="all latest records")
+    l.add_argument("file")
+    p = sub.add_parser("put", help="append a record (JSON object with k); ts is set automatically")
+    p.add_argument("file"); p.add_argument("json")
+    a = ap.parse_args(argv)
+
+    if a.cmd == "sources":
+        emit({"name": n, "purpose": s.get("purpose", ""), "doc": s.get("doc", ""), "dir": s["dir"]}
+             for n, s in load_sources().items())
+        return 0
+    path, ttl = resolve(a.file)
+    if a.cmd == "get":
+        rec = latest(path).get(a.key)
+        if rec is None:
+            return 1
+        emit([mark(ttl, rec)])
+    elif a.cmd == "find":
+        terms = [t.lower() for t in a.text]
+        hits = [mark(ttl, r) for r in latest(path).values()
+                if all(t in json.dumps(r, ensure_ascii=False).lower() for t in terms)]
+        emit(hits)
+        return 0 if hits else 1
+    elif a.cmd == "ls":
+        emit(mark(ttl, r) for r in latest(path).values())
+    elif a.cmd == "put":
+        try:
+            rec = json.loads(a.json)
+        except json.JSONDecodeError as e:
+            fail(f"record is not JSON: {e}")
+        if not isinstance(rec, dict) or not str(rec.get("k", "")).strip():
+            fail("record must be a JSON object with a non-empty 'k'")
+        rec.pop("_stale", None)
+        rec["ts"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        line = json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:  # single small append: atomic enough for parallel agents
+            fh.write(line)
+        emit([rec])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

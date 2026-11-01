@@ -224,6 +224,7 @@ if (live.enabledPlugins['caveman@caveman'] !== false) throw new Error('local plu
 for (const key of Object.keys(repo.enabledPlugins)) if (!(key in live.enabledPlugins)) throw new Error('missing plugin ' + key);
 for (const key of Object.keys(repo.extraKnownMarketplaces)) if (!(key in live.extraKnownMarketplaces)) throw new Error('missing marketplace ' + key);
 if (live.statusLine.command !== repo.statusLine.command) throw new Error('statusLine missing');
+if (live.autoMemoryEnabled !== false) throw new Error('Claude auto-memory not disabled');
 NODE
 # Claude MCP servers are registered once; a server the machine already has is left alone.
 grep -qx context7 "$STUB_ADDED"
@@ -231,10 +232,20 @@ if grep -qx github "$STUB_ADDED"; then exit 1; fi
 test -x "$H/.claude/statusline.sh"
 cmp "$ROOT/home/dot_claude/executable_statusline.sh" "$H/.claude/statusline.sh"
 test -z "$(cz hybrid diff)"
-# MEMORY.md is created once and never overwritten.
+# MEMORY.md and the cache manifest are created once and never overwritten; ai-mem is installed.
+cmp "$ROOT/home/dot_config/private_ai-memory/create_structure.json" "$H/.config/ai-memory/structure.json"
+cmp "$ROOT/home/dot_local/bin/executable_ai-mem" "$H/.local/bin/ai-mem"
+test -x "$H/.local/bin/ai-mem"
 printf '%s\n' 'my memory' >"$H/.config/ai-memory/MEMORY.md"
+printf '%s\n' '{"sources": {"mine": {"dir": "/x"}}}' >"$H/.config/ai-memory/structure.json"
 cz hybrid apply
 grep -qx 'my memory' "$H/.config/ai-memory/MEMORY.md"
+grep -q '"mine"' "$H/.config/ai-memory/structure.json"
+# The old Pi-only MEMORY.md must be merged into the shared one, never left unread.
+printf '%s\n' 'old pi memory' >"$H/.pi/agent/MEMORY.md"
+if cz hybrid apply >"$TMP/legacy-memory.log" 2>&1; then exit 1; fi
+grep -q 'MEMORY.md is no longer read' "$TMP/legacy-memory.log"
+rm "$H/.pi/agent/MEMORY.md"
 # Editing local.md flows into every generated instruction file on the next apply.
 printf '%s\n' 'updated local rule' >>"$LOCAL"
 cz hybrid apply
