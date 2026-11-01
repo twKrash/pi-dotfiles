@@ -202,8 +202,12 @@ PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CACHE_CALLS" PROMPT_LAB_DIR="$LAB"
 grep -qx 'optimized-1' "$CONTEXT_CACHE_STATE/prompt-opt/last-output.md"
 cmp "$TMP/context-request.md" "$CONTEXT_CACHE_STATE/prompt-opt/last-successful-input.md"
 test ! -s "$CONTEXT_CACHE_STATE/prompt-opt/last-successful-context.txt"
-CONTEXT_CACHE_OUTPUT=$(find "$CONTEXT_CACHE_STATE/prompt-opt/history" -mindepth 4 -maxdepth 4 -path '*/unverified/*' -type f -name optimized.md | head -n 1)
+# The earlier context-free run is also imported as a legacy-* unverified entry; find's order is
+# filesystem-dependent, so select the context run's entry explicitly (exactly one expected).
+CONTEXT_CACHE_OUTPUT=$(find "$CONTEXT_CACHE_STATE/prompt-opt/history" -mindepth 4 -maxdepth 4 -path '*/unverified/*' \
+  ! -path '*/unverified/legacy-*' -type f -name optimized.md)
 test -n "$CONTEXT_CACHE_OUTPUT"
+test "$(printf '%s\n' "$CONTEXT_CACHE_OUTPUT" | wc -l)" -eq 1
 grep -qx 'optimized-2' "$CONTEXT_CACHE_OUTPUT"
 PATH="$TMP/mock-bin:$PATH" PI_CALLS="$CONTEXT_CACHE_CALLS" PROMPT_LAB_DIR="$LAB" XDG_STATE_HOME="$CONTEXT_CACHE_STATE" \
   "$PROMPT_OPT" --debug "$TMP/context-request.md" >"$TMP/context-cache-hit.out" 2>"$TMP/context-cache-hit.log"
