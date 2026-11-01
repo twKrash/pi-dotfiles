@@ -26,7 +26,7 @@ chezmoi apply                                          # asks before replacing a
 | Update | `git pull --ff-only && chezmoi diff && chezmoi apply` |
 | A managed file was edited locally | `chezmoi apply` asks (diff / overwrite / skip); `chezmoi merge <file>` opens a 3-way merge |
 | Copy a local edit back into the repo | `chezmoi re-add <file>` (plain files), then commit |
-| Machine-only instructions | edit `~/.config/chezmoi/local.md`, then `chezmoi apply` |
+| Machine-only instructions | edit `~/.config/chezmoi/local.md` (all harnesses) or `local.<harness>.md` (one harness), then `chezmoi apply` |
 
 ## Harnesses
 
@@ -34,11 +34,11 @@ Each selected harness gets its own generated global instructions file; files of 
 
 | Harness | Generated file | Contents |
 |---|---|---|
-| `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local |
-| `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local |
-| `codex` | `~/.codex/AGENTS.md` | core + Codex addendum + local |
+| `pi` | `~/.pi/agent/AGENTS.md` | core + `instructions/harness-pi.md` + local + `local.pi.md` |
+| `claude` | `~/.claude/CLAUDE.md` | core + `instructions/harness-claude.md` + local + `local.claude.md` |
+| `codex` | `~/.codex/AGENTS.md` | core + Codex addendum + local + `local.codex.md` |
 
-Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
+Core is `instructions/core.md` (no harness or provider specifics). Local is the optional `~/.config/chezmoi/local.md` for machine- or employer-specific rules; it never enters the repo. Rules for a single harness go in `~/.config/chezmoi/local.<harness>.md` (`local.pi.md`, `local.claude.md`, `local.codex.md`), appended after `local.md` for that harness only. Edit these sources, not the generated files. Pi config, `prompt-opt`, and the prompt lab are installed only when `pi` is selected. The Pi addendum lives inside `AGENTS.md` because Pi always loads the global `AGENTS.md`, whereas a trusted project's `.pi/APPEND_SYSTEM.md` replaces the global `APPEND_SYSTEM.md`. Source files avoid the names `AGENTS.md`/`CLAUDE.md` so agents working in this repo do not load them as context. Target paths are fixed (`~/.pi/agent`, `~/.claude`, `~/.codex`).
 
 ## Layout
 
