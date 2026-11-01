@@ -1,0 +1,4 @@
+#!/bin/sh
+# Merge repo defaults (plugins, marketplaces, status line) into the live file, stdin -> stdout.
+# Local values and keys Claude Code adds itself are kept.
+exec node {{ joinPath .chezmoi.workingTree "scripts/merge-json.mjs" | shellQuote }} claude {{ joinPath .chezmoi.workingTree "claude/settings.json" | shellQuote }}

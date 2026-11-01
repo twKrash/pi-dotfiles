@@ -53,6 +53,7 @@ Core is `instructions/core.md` (no harness or provider specifics). Local is the 
 - `home/.chezmoitemplates/instructions.tmpl`: composes the per-harness instruction files.
 - `instructions/`: core and per-harness instruction sources.
 - `agent/settings.json`, `agent/mcp.json`, `agent/providers/`: merge inputs (package list and portable `pi-subagents` role defaults; Context7 only, no personal MCP headers; opt-in `codex` and `claude` subagent profiles).
+- `claude/settings.json`, `home/dot_claude/modify_settings.json.tmpl`, `home/dot_claude/executable_statusline.sh`: Claude Code plugins (`extraKnownMarketplaces`, `enabledPlugins`) and the status line. Defaults are merged into `~/.claude/settings.json` by `scripts/merge-json.mjs claude`: missing keys are added, local values win and are reported, and permissions and hooks are never touched. Plugins are not installed by the merge (run `claude plugin install <name>@<marketplace>` or let Claude Code offer them) and run code, so review them before installing. Add a plugin by listing it in `claude/settings.json`; the Claude addendum tells the agent to do that when asked to install one.
 - Graphify skill: not vendored. Install it with `graphify install --platform pi` (and `--platform claude`) and re-run after upgrading graphify.
 - `tests/`: `sh tests/prompt-opt.sh` and `sh tests/chezmoi.sh` (applies into throwaway homes; never touches `~`).
 

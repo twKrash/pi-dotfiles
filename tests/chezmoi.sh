@@ -65,6 +65,9 @@ H="$TMP/hybrid/home"
 # an existing empty MEMORY.md is kept (chezmoi removes empty targets unless marked empty_).
 mkdir -p "$H/.pi/agent/extensions/pi-permission-system"
 mkdir -p "$H/.config/ai-memory"
+# Existing Claude Code settings: local permissions and a local plugin survive the merge.
+mkdir -p "$H/.claude"
+printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false}}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
@@ -181,6 +184,19 @@ NODE
 node -e 'const f=process.argv[1],fs=require("fs"),j=JSON.parse(fs.readFileSync(f));j.piWroteThis=true;fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$H/.pi/agent/settings.json"
 cz hybrid apply
 grep -q piWroteThis "$H/.pi/agent/settings.json"
+node - "$H/.claude/settings.json" "$ROOT/claude/settings.json" <<'NODE'
+const fs = require('fs');
+const live = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const repo = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+if (live.permissions.allow[0] !== 'Read(/x)') throw new Error('local permissions lost');
+if (live.enabledPlugins['local@mine'] !== true) throw new Error('local plugin lost');
+if (live.enabledPlugins['caveman@caveman'] !== false) throw new Error('local plugin choice overwritten');
+for (const key of Object.keys(repo.enabledPlugins)) if (!(key in live.enabledPlugins)) throw new Error('missing plugin ' + key);
+for (const key of Object.keys(repo.extraKnownMarketplaces)) if (!(key in live.extraKnownMarketplaces)) throw new Error('missing marketplace ' + key);
+if (live.statusLine.command !== repo.statusLine.command) throw new Error('statusLine missing');
+NODE
+test -x "$H/.claude/statusline.sh"
+cmp "$ROOT/home/dot_claude/executable_statusline.sh" "$H/.claude/statusline.sh"
 test -z "$(cz hybrid diff)"
 # MEMORY.md is created once and never overwritten.
 printf '%s\n' 'my memory' >"$H/.config/ai-memory/MEMORY.md"
