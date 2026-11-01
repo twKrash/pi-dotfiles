@@ -62,14 +62,15 @@ code 1 mem find atlassian/jira/missing x
 python3 -c 'print("[" * 100000 + "]" * 100000)' >"$TMP/deep"
 {
   printf '%s\n' '[]' '"x"' '3' 'null' 'true' '{"no":"k"}' '{"k":["a"]}' '{"k":{"a":1}}' '{"k":5}' '{"k":""}' \
-    '{"k":"nan","v":NaN}'
+    '{"k":"nan","v":NaN}' '{"k":"lone","v":"\ud800"}'
   cat "$TMP/deep"
   printf '{"k":"ok","ts":"%s"}\n' "$(days_ago 1)"
 } >"$TMP/work/jira/mixed.jsonl"
 code 0 mem get atlassian/jira/mixed ok
 grep -q '"k":"ok"' "$TMP/out"
-test "$(grep -c 'skip bad line' "$TMP/err")" -eq 12
+test "$(grep -c 'skip bad line' "$TMP/err")" -eq 13
 code 1 mem get atlassian/jira/mixed nan
+code 1 mem get atlassian/jira/mixed lone
 test "$(mem ls atlassian/jira/mixed 2>/dev/null | wc -l)" -eq 1
 
 # A ts that is missing, not a string, without timezone or in the future counts as stale.
@@ -81,8 +82,9 @@ for key in none num naive date future; do
 done
 
 # TTL precedence: per-file value, then the source default, then 90 days; looked up by the
-# normalised file name.
-printf '{"k":"p1","ts":"%s"}\n' "$(days_ago 10)" >"$TMP/work/jira/people.jsonl"
+# normalised name as given, not a symlink's target.
+printf '{"k":"p1","ts":"%s"}\n' "$(days_ago 10)" >"$TMP/work/jira/people-2026.jsonl"
+ln -s people-2026.jsonl "$TMP/work/jira/people.jsonl"
 printf '{"k":"x","ts":"%s"}\n{"k":"old","ts":"%s"}\n' "$(days_ago 10)" "$(days_ago 200)" >"$TMP/work/jira/fields.jsonl"
 printf '{"k":"n","ts":"%s"}\n{"k":"ancient","ts":"2020-01-01T00:00:00Z"}\n' "$(days_ago 200)" >"$TMP/home-notes/old.jsonl"
 for name in atlassian/jira/people atlassian/jira//people atlassian/./jira/people; do
@@ -100,10 +102,12 @@ mem get notes/old ancient | grep -q '"_stale":true'
 # Bad records and names exit 2 and leave the cache untouched.
 cp "$TMP/work/jira/teams.jsonl" "$TMP/teams-before"
 for record in '{"name":"no key"}' '{"k":null}' '{"k":5}' '{"k":true}' '{"k":[1]}' '{"k":{}}' '{"k":""}' \
-  '{"k":"  "}' '{"k":"a","v":NaN}' 'not json' '[]'; do
+  '{"k":"  "}' '{"k":"a","v":NaN}' '{"k":"a","v":"\ud800"}' '{"k":"\udcff"}' 'not json' '[]'; do
   code 2 mem put atlassian/jira/teams "$record"
+  code 2 mem put atlassian/jira/new "$record"
 done
 cmp "$TMP/teams-before" "$TMP/work/jira/teams.jsonl"
+test ! -e "$TMP/work/jira/new.jsonl"
 code 2 mem get jira/teams t1
 code 2 mem get atlassian t1
 code 2 mem put unknown/x '{"k":"a"}'
@@ -124,6 +128,15 @@ code 2 mem get atlassian/jira/locked a
 mkdir "$TMP/work/readonly"
 chmod 555 "$TMP/work/readonly"
 code 2 mem put atlassian/readonly/x '{"k":"a"}'
+# A folder that cannot be entered, or a symlink loop, exits 2 instead of reading as a miss.
+mkdir "$TMP/work/sealed"
+chmod 000 "$TMP/work/sealed"
+code 2 mem get atlassian/sealed/x a
+code 2 mem put atlassian/sealed/x '{"k":"a"}'
+chmod 755 "$TMP/work/sealed"
+ln -s loop-b.jsonl "$TMP/work/loop-a.jsonl"
+ln -s loop-a.jsonl "$TMP/work/loop-b.jsonl"
+code 2 mem get atlassian/loop-a x
 
 # Broken manifests exit 2: missing source dir, bad fields, wrong types, unreadable or non-UTF-8.
 manifest "{\"sources\": {\"gone\": {\"dir\": \"$TMP/nope\"}}}"
@@ -151,6 +164,12 @@ rm "$AI_MEM_MANIFEST"
 mkdir "$AI_MEM_MANIFEST"
 code 2 mem sources
 rmdir "$AI_MEM_MANIFEST"
+# A manifest inside a folder that cannot be entered.
+mkdir "$TMP/sealed-config"
+cp "$TMP/good-manifest.json" "$TMP/sealed-config/structure.json"
+chmod 000 "$TMP/sealed-config"
+code 2 env AI_MEM_MANIFEST="$TMP/sealed-config/structure.json" python3 "$ROOT/home/dot_local/bin/executable_ai-mem" sources
+chmod 755 "$TMP/sealed-config"
 cp "$TMP/good-manifest.json" "$AI_MEM_MANIFEST"
 chmod 000 "$AI_MEM_MANIFEST"
 code 2 mem sources

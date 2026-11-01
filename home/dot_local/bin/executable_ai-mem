@@ -45,10 +45,12 @@ def fail(message: str) -> NoReturn:
     sys.exit(2)  # distinct from exit 1 = miss
 
 
-def read_text(path: Path) -> str:
-    """File contents; any read or decoding error exits 2, never 1."""
+def read_text(path: Path) -> Optional[str]:
+    """File contents, or None if absent; other errors exit 2, never 1."""
     try:
         return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
     except (OSError, UnicodeDecodeError) as error:
         fail(f"cannot read {path}: {error}")
 
@@ -58,11 +60,17 @@ def reject_constant(name: str) -> NoReturn:
 
 
 def parse_json(text: str) -> object:
-    """Strict JSON (no NaN/Infinity); raises ValueError on bad input."""
+    """Strict JSON that can be written back as UTF-8; else ValueError.
+
+    Rejects NaN/Infinity, deep nesting and lone surrogates ("\\ud800"),
+    which json accepts but UTF-8 output cannot encode.
+    """
     try:
-        return json.loads(text, parse_constant=reject_constant)
+        value = json.loads(text, parse_constant=reject_constant)
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
     except RecursionError:
         raise ValueError("JSON nested too deeply") from None
+    return value  # UnicodeEncodeError is a ValueError and propagates
 
 
 def dumps(record: dict) -> str:
@@ -103,10 +111,11 @@ def check_source(name: str, source: object) -> None:
 
 
 def load_sources() -> dict:
-    if not MANIFEST.exists():
+    text = read_text(MANIFEST)
+    if text is None:
         fail(f"no manifest at {MANIFEST}")
     try:
-        manifest = parse_json(read_text(MANIFEST))
+        manifest = parse_json(text)
     except ValueError as error:
         fail(f"bad manifest {MANIFEST}: {error}")
     if not isinstance(manifest, dict):
@@ -123,7 +132,8 @@ def resolve(name: str) -> tuple[Path, int]:
     """JSONL path and TTL in days for "<source>/<file>".
 
     The path never escapes the source dir; the TTL is looked up by the
-    normalised file name, so "jira//teams" and "./jira/teams" match too.
+    name as given, normalised as text ("jira//teams" and "./jira/teams"
+    match "jira/teams"; symlinks are not followed for the lookup).
     """
     sources = load_sources()
     source_name, _, relative = name.removesuffix(".jsonl").partition("/")
@@ -132,13 +142,16 @@ def resolve(name: str) -> tuple[Path, int]:
         fail(f"bad file name: {name} "
              f"(must be <source>/<file>, sources: {known})")
     source = sources[source_name]
-    root = Path(source["dir"]).expanduser().resolve()
-    if not root.is_dir():
-        fail(f"source {source_name}: {root} is not a directory")
-    path = (root / f"{relative}.jsonl").resolve()
+    try:
+        root = Path(source["dir"]).expanduser().resolve()
+        if not root.is_dir():
+            fail(f"source {source_name}: {root} is not a directory")
+        path = (root / f"{relative}.jsonl").resolve()
+    except (OSError, RuntimeError) as error:  # permissions, symlink loops
+        fail(f"cannot resolve {name}: {error}")
     if root not in path.parents:
         fail(f"bad file name: {name}")
-    file_key = path.relative_to(root).with_suffix("").as_posix()
+    file_key = os.path.normpath(relative)
     default = source.get("defaultTtl", DEFAULT_TTL)
     return path, source.get("ttl", {}).get(file_key, default)
 
@@ -157,9 +170,10 @@ def parse_record(line: str) -> Optional[dict]:
 def latest(path: Path) -> dict:
     """All valid records of a file, newest line per key wins."""
     records: dict = {}
-    if not path.exists():
+    text = read_text(path)
+    if text is None:
         return records
-    for number, line in enumerate(read_text(path).splitlines(), 1):
+    for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         record = parse_record(line)
