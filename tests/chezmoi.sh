@@ -226,10 +226,13 @@ for instructions in "$H/.pi/agent/AGENTS.md" "$H/.claude/CLAUDE.md"; do
   grep -Fq 'Their final report lists each exact path and purpose' "$instructions"
   grep -Fq 'Report only task-created artifacts, not pre-existing or runtime-managed files.' "$instructions"
   grep -Fq 'asks the user whether to remove them. It removes only the paths the user approves.' "$instructions"
+  grep -Fq 'Give a delegated agent a self-contained brief' "$instructions"
+  grep -Fq 'in the project'"'"'s canonical decision mechanism' "$instructions"
 done
 grep -q 'pi-subagents' "$H/.pi/agent/AGENTS.md"
 grep -Fq 'These Pi rules apply to all configured Pi model profiles, including the Claude-backed profile.' "$H/.pi/agent/AGENTS.md"
-grep -Fq 'Delegated agents must not run `rm`.' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'Delegated agents must not run commands the Pi permission config marks `ask`' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'Deleting files the task itself requires is allowed' "$H/.pi/agent/AGENTS.md"
 grep -Fq 'native subagent permission asks are forwarded to the parent session' "$H/.pi/agent/AGENTS.md"
 if grep -qE '^<<<<<<< |^=======|^>>>>>>> ' "$H/.pi/agent/AGENTS.md"; then exit 1; fi
 # No harness carries a handoff section.
