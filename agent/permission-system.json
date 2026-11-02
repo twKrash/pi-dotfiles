@@ -35,19 +35,14 @@
       "~/.pi/agent/skills/*": "allow",
       "~/.pi/agent/session-inspector/*": "allow",
       "~/.herdr/*": "allow",
-      "~/code/*": "allow",
-      "~/code": "allow",
       "/tmp/*": "allow",
       "/tmp": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
-      "~/.config/ai-memory/MEMORY.md": "allow",
-      "~/pi": "allow"
+      "~/.config/ai-memory/MEMORY.md": "allow"
     },
 
     "external_directory_read": {
-      "~/code/*": "allow",
       "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",
-      "/home/dvory/.local/share/*": "allow",
       "~/.pi/*": "allow",
       "/tmp/*": "allow",
       "~/.herdr/*": "allow",
@@ -58,7 +53,6 @@
     },
     "external_directory_write": {
       "/tmp/*": "allow",
-      "~/code/*": "allow",
       "~/.herdr/*": "allow",
       "~/.cache/graphify-queries.log": "allow",
       "~/.pi/agent/sessions/*/subagent-artifacts/*": "allow",

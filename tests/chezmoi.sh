@@ -33,6 +33,38 @@ node "$ROOT/scripts/merge-json.mjs" settings "$TMP/settings-defaults.json" \
   <"$TMP/pi-settings.json" >"$TMP/merged-settings.json"
 cmp "$TMP/pi-settings.json" "$TMP/merged-settings.json"
 
+# Repo permission defaults stay portable: no absolute user-home paths or one machine's checkouts.
+if grep -nE '"(/home/|/Users/|~/code|~/pi")' "$ROOT/agent/permission-system.json"; then exit 1; fi
+# Permission merge only tightens, judged per surface (stdin = current file, $2 = repo defaults).
+# perm_check CURRENT CONDITION MESSAGE [REPO]: merge, then CONDITION (JS over `p`, the merged permission) must hold.
+perm_check() {
+  printf '%s' "$1" | node "$ROOT/scripts/merge-json.mjs" permission "${4:-$ROOT/agent/permission-system.json}" 2>/dev/null |
+    node -e 'const p = JSON.parse(require("fs").readFileSync(0, "utf8")).permission ?? {}; if (!(eval(process.argv[1]))) throw new Error(process.argv[2])' "$2" "$3"
+}
+perm_check '{"permission":{"*":"allow"}}' 'p.bash["rm -rf *"] === "ask" && !("*" in p.bash)' 'ask not added under allow, or repo allow added'
+# Rules join an existing local surface after its catch-all, so they win.
+perm_check '{"permission":{"*":"allow","bash":{"*":"allow"}}}' 'Object.keys(p.bash)[0] === "*" && p.bash["sudo *"] === "ask"' 'ask not added to an existing surface'
+perm_check '{"permission":{"*":"deny"}}' '!p.bash' 'ask added under catch-all deny'
+perm_check '{"permission":{"*":"allow","bash":{"rm *":"deny"}}}' '!("rm -rf *" in p.bash)' 'ask added after a local deny'
+# Object-form denies count as denies (the plugin's {action, reason} rule).
+perm_check '{"permission":{"*":"allow","bash":{"*":"allow","git push --force *":{"action":"deny","reason":"r"}}}}' '!("git push *" in p.bash)' 'ask added after an object deny'
+perm_check '{"permission":{"*":"allow","bash":{"*":{"action":"deny","reason":"r"}}}}' 'Object.keys(p.bash).length === 1' 'ask added under an object catch-all deny'
+# A local string surface is a local value: kept as is.
+perm_check '{"permission":{"*":"allow","bash":"allow"}}' 'p.bash === "allow"' 'string surface changed'
+# Directional surfaces inherit the bare key's catch-all and denies, which the plugin runs first.
+printf '%s\n' '{"permission":{"external_directory_read":{"~/x/*":"ask"}}}' >"$TMP/perm-dir.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"deny"}}}' '!p.external_directory_read' 'ask added under a bare-key deny' "$TMP/perm-dir.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow","~/x/*":"deny"}}}' '!p.external_directory_read' 'ask added after a bare-key deny' "$TMP/perm-dir.json"
+# The plugin copies top-level mcp__* rules after every mcp rule, so they are never added.
+printf '%s\n' '{"permission":{"mcp__srv__*":"ask"}}' >"$TMP/perm-mcp.json"
+perm_check '{"permission":{"*":"allow","mcp":{"mcp__srv__danger":"deny"}}}' '!("mcp__srv__*" in p)' 'top-level mcp__ rule added' "$TMP/perm-mcp.json"
+perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow"}}}' 'p.external_directory_read["~/x/*"] === "ask"' 'ask not added under a bare-key allow' "$TMP/perm-dir.json"
+# An existing blank file means "ask everything" to the plugin: only stricter denies are added.
+perm_check '   ' '!("*" in p) && !p.bash && p.path["*.env"] === "deny"' 'blank existing file loosened'
+# Only a missing live file (PI_DOTFILES_FRESH from the template) gets the full defaults.
+printf '' | PI_DOTFILES_FRESH=1 node "$ROOT/scripts/merge-json.mjs" permission "$ROOT/agent/permission-system.json" |
+  node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8")).permission; if (p.bash["*"]!=="allow") throw new Error("fresh install incomplete")'
+
 # cz NAME ARGS...: chezmoi with a per-machine HOME, config, state, and destination under $TMP/NAME
 # (source: $SRC, default this checkout).
 cz() {
@@ -89,7 +121,7 @@ mkdir -p "$H/.claude"
 printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
-printf '%s\n' '{"permission":{"*":"deny"}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
+printf '%s\n' '{"piInfrastructureReadPaths":["/local/infra"],"permission":{"*":"deny","bash":{"my-local-cmd":"allow"}}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
 printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
 ln -s "$TMP/hybrid/linked.md" "$H/.pi/agent/AGENTS.md"
 node - "$H/.pi/agent/settings.json" "$H/.pi/agent/mcp.json" "$H/.pi/agent/pi-goal.json" <<'NODE'
@@ -135,8 +167,19 @@ if cz hybrid apply --force >"$TMP/legacy.log" 2>&1; then exit 1; fi
 grep -q 'move .*pi-dotfiles/local.md' "$TMP/legacy.log"
 mv "$TMP/local.md.aside" "$LOCAL"
 rm -r "$H/.config/pi-dotfiles"
-# Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state.
-cz hybrid apply --force
+# Explicit resolution (here: --force, i.e. "overwrite all") then applies the repo state. PI_DOTFILES_FRESH
+# exported by the caller must not leak into the permission merge and fill an existing file with defaults.
+(PI_DOTFILES_FRESH=1 && export PI_DOTFILES_FRESH && cz hybrid apply --force)
+# Permission policy only tightens an existing file: local rules survive, missing repo deny/ask rules are
+# added only where they tighten the local decision (not under a local catch-all deny), repo allow rules never.
+node - "$H/.pi/agent/extensions/pi-permission-system/config.json" <<'NODE'
+const live = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+if (live.permission['*'] !== 'deny') throw new Error('local catch-all changed');
+if (live.permission.bash['my-local-cmd'] !== 'allow') throw new Error('local bash rule lost');
+if (!live.piInfrastructureReadPaths.includes('/local/infra')) throw new Error('local path lost');
+if ('rm -rf *' in live.permission.bash) throw new Error('repo ask rule loosened a local deny');
+if ('*' in live.permission.bash) throw new Error('repo allow rule loosened local policy');
+NODE
 # Plain files are installed as-is; prompt-opt is executable.
 test -x "$H/.local/bin/prompt-opt"
 cmp "$ROOT/home/dot_local/bin/executable_prompt-opt" "$H/.local/bin/prompt-opt"
@@ -286,6 +329,13 @@ C="$TMP/home/home"
 cmp "$ROOT/home/dot_config/private_ai-memory/create_empty_MEMORY.md" "$C/.config/ai-memory/MEMORY.md"
 expected_instructions codex "$TMP/home/local.md" >"$TMP/expected-codex.md"
 cmp "$TMP/expected-codex.md" "$C/.codex/AGENTS.md"
+# A fresh install gets the full repo permission defaults.
+node - "$C/.pi/agent/extensions/pi-permission-system/config.json" "$ROOT/agent/permission-system.json" <<'NODE'
+const fs = require('fs');
+const live = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const repo = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+if (JSON.stringify(live.permission) !== JSON.stringify(repo.permission)) throw new Error('fresh install differs from repo defaults');
+NODE
 grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
 grep -q 'task-specific handoff note' "$C/.codex/AGENTS.md"
 if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
