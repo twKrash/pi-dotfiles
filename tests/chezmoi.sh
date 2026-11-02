@@ -221,11 +221,22 @@ expected_instructions pi "$LOCAL" >"$TMP/expected-pi.md"
 cmp "$TMP/expected-pi.md" "$H/.pi/agent/AGENTS.md"
 expected_instructions claude "$LOCAL" >"$TMP/expected-claude.md"
 cmp "$TMP/expected-claude.md" "$H/.claude/CLAUDE.md"
+for instructions in "$H/.pi/agent/AGENTS.md" "$H/.claude/CLAUDE.md"; do
+  grep -Fq 'Agents leave them in place and do not delete them.' "$instructions"
+  grep -Fq 'Their final report lists each exact path and purpose' "$instructions"
+  grep -Fq 'Report only task-created artifacts, not pre-existing or runtime-managed files.' "$instructions"
+  grep -Fq 'asks the user whether to remove them. It removes only the paths the user approves.' "$instructions"
+done
 grep -q 'pi-subagents' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'These Pi rules apply to all configured Pi model profiles, including the Claude-backed profile.' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'Delegated agents must not run `rm`.' "$H/.pi/agent/AGENTS.md"
+grep -Fq 'native subagent permission asks are forwarded to the parent session' "$H/.pi/agent/AGENTS.md"
 if grep -qE '^<<<<<<< |^=======|^>>>>>>> ' "$H/.pi/agent/AGENTS.md"; then exit 1; fi
+# No harness carries a handoff section.
+if grep -q '^## Handoffs' "$H/.pi/agent/AGENTS.md" "$H/.claude/CLAUDE.md"; then exit 1; fi
 if grep -qE 'PI_SESSION_ID|ACTIVE\.md|\.pi/tmp/handoffs' "$H/.pi/agent/AGENTS.md"; then exit 1; fi
 grep -Fq 'Check `graphify-out/` relative to that target root' "$H/.pi/agent/AGENTS.md"
-if grep -q 'pi-subagents\|codemode' "$H/.claude/CLAUDE.md"; then exit 1; fi
+if grep -q 'pi-subagents\|codemode\|Pi permission\|rm -rf' "$H/.claude/CLAUDE.md"; then exit 1; fi
 test ! -e "$H/.pi/agent/APPEND_SYSTEM.md"
 test ! -e "$H/.codex"
 # JSON is merged, not replaced: repo defaults and the Claude profile are added, local values kept.
@@ -337,7 +348,7 @@ const repo = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 if (JSON.stringify(live.permission) !== JSON.stringify(repo.permission)) throw new Error('fresh install differs from repo defaults');
 NODE
 grep -q 'main chat as the orchestrator' "$C/.codex/AGENTS.md"
-grep -q 'task-specific handoff note' "$C/.codex/AGENTS.md"
+if grep -qi 'handoff note\|^## Handoffs' "$C/.codex/AGENTS.md"; then exit 1; fi
 if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
 # Codex gets the code-standards skill its instructions point to.
 grep -Fq 'load the `code-standards` skill' "$C/.codex/AGENTS.md"

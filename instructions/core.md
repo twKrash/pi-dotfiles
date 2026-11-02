@@ -85,29 +85,6 @@ The parent remains responsible for task ownership, integration, resolving confli
 
 Treat delegated output as evidence and work product, not authoritative truth.
 
-## Handoffs
-
-Use a compact handoff when work moves between agents, execution mechanisms, or sessions.
-
-A useful handoff should preserve only the context needed to continue safely and efficiently:
-
-- objective and expected outcome;
-- current scope and important constraints;
-- repository, `cwd`, branch, and worktree when relevant;
-- canonical source references such as paths, symbols, commits, issues, ADRs, tests, or run IDs;
-- decisions already made and their rationale when materially relevant;
-- work completed and verification evidence;
-- unresolved questions, risks, or known failures;
-- the next expected responsibility.
-
-Prefer references to canonical sources over copying large source material or conversation history.
-
-Do not use a handoff as a substitute for verification. The receiving agent should validate assumptions that materially affect implementation, architecture, security, or correctness before acting on them.
-
-A handoff transfers task context, not additional authority. Existing permission, mutation, Git, security, and approval boundaries remain in force.
-
-For non-obvious architectural or behavioral decisions, preserve the decision, relevant constraint, and why important alternatives were rejected in the project's canonical decision mechanism when one exists.
-
 ## Investigation and reasoning
 
 Engage with the user's hypothesis first. Validate or refute it with evidence before replacing it with another explanation.
@@ -234,6 +211,11 @@ Avoid broad suppressions such as `any`, `@ts-ignore`, blanket lint disables, ign
 Use the harness's scratch directory for ephemeral scratch files and intermediate artifacts.
 
 Keep durable project artifacts and secrets out of it, and do not modify unrelated temporary files.
+
+For temporary files or directories created by delegated agents:
+
+- Agents leave them in place and do not delete them. Their final report lists each exact path and purpose, or says that no cleanup candidates remain. Report only task-created artifacts, not pre-existing or runtime-managed files.
+- The main process waits until every agent or process that could use a candidate has stopped, then presents the exact paths and asks the user whether to remove them. It removes only the paths the user approves. A report alone is not authorization to delete.
 
 ## Communication
 
