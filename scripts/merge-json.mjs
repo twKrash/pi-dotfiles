@@ -70,7 +70,7 @@ function tightenMap(local, repo, base, denied, label) {
 function tightenPermission(local, repo) {
   const fallback = Object.hasOwn(local, '*') ? action(local['*']) : 'ask';
   for (const [name, repoSurface] of Object.entries(repo)) {
-    // The plugin moves top-level mcp__* keys after every `mcp` rule, where an ask could override a local deny.
+    // The plugin copies top-level mcp__* rules after every `mcp` rule, where an ask could override a local deny.
     if (name.startsWith('mcp__')) continue;
     const label = `permission.${name}`;
     const bare = Object.hasOwn(local, BARE[name]) ? local[BARE[name]] : undefined;

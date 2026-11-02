@@ -55,7 +55,7 @@ perm_check '{"permission":{"*":"allow","bash":"allow"}}' 'p.bash === "allow"' 's
 printf '%s\n' '{"permission":{"external_directory_read":{"~/x/*":"ask"}}}' >"$TMP/perm-dir.json"
 perm_check '{"permission":{"*":"allow","external_directory":{"*":"deny"}}}' '!p.external_directory_read' 'ask added under a bare-key deny' "$TMP/perm-dir.json"
 perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow","~/x/*":"deny"}}}' '!p.external_directory_read' 'ask added after a bare-key deny' "$TMP/perm-dir.json"
-# Top-level mcp__* keys are moved by the plugin after every mcp rule, so they are never added.
+# The plugin copies top-level mcp__* rules after every mcp rule, so they are never added.
 printf '%s\n' '{"permission":{"mcp__srv__*":"ask"}}' >"$TMP/perm-mcp.json"
 perm_check '{"permission":{"*":"allow","mcp":{"mcp__srv__danger":"deny"}}}' '!("mcp__srv__*" in p)' 'top-level mcp__ rule added' "$TMP/perm-mcp.json"
 perm_check '{"permission":{"*":"allow","external_directory":{"*":"allow"}}}' 'p.external_directory_read["~/x/*"] === "ask"' 'ask not added under a bare-key allow' "$TMP/perm-dir.json"
