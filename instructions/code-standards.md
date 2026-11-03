@@ -104,9 +104,17 @@ changed code before final review and report the results:
 Justify any remaining exception. These gates test the tests; they do not replace
 the behavioral tests above.
 
-If `code-gates doctor` reports a missing tool, or a tool is not on `PATH`, recommend
-that the user install it with [uv](https://docs.astral.sh/uv/) and continue without
-that gate meanwhile; do not install it yourself:
+Run `code-gates doctor` once per session before the first commit. It prints the
+commands for any missing setup step:
+
+- A missing tool: recommend that the user install it with
+  [uv](https://docs.astral.sh/uv/) and continue without that gate meanwhile; do not
+  install it yourself.
+- The commit gate (a global git `pre-commit` hook, git 2.54+) or the git ignore for
+  the tools' output: show the user the printed commands and run them only after
+  they approve.
+
+The install commands:
 
 ```sh
 uv tool install git+https://github.com/unclebob/crapper
@@ -123,16 +131,16 @@ Run them through `code-gates`:
 - After each Python or TypeScript edit, a `code-gates` line in the tool result
   lists functions with complexity 10 or above (CRAP is never below complexity)
   and duplicates of the edited file. Fix the ones in code you changed.
-- Before committing, stage the change in its own command and run `code-gates run`
-  in the repository; a commit of staged code files is blocked until it has run on
-  exactly that staged content, and so is a commit command that stages ungated
-  code itself (`git add ... && git commit`, `git commit -a`). Pass `--test-command` (for example
+- Before committing, stage the change and run `code-gates run` in the repository.
+  git's `pre-commit` hook fails an agent's commit of code files that `code-gates run`
+  has not seen in exactly that form, including `git commit -a` and
+  `git commit <paths>`; commit the staged files with a plain `git commit`. Pass `--test-command` (for example
   `"uv run pytest -q -x tests/<area>"`) to limit mutator to the matching tests, and
   `--coverage-command` when the default coverage run does not work for the repository.
   Use `--no-mutator` only when you tell the user why.
 - Report the results to the user before committing. Only the user may skip the
-  gate (`CODE_GATES_SKIP=1 git commit ...`).
+  gate (`CODE_GATES_SKIP=1 git commit ...`); never use `--no-verify` to get past it.
 
 The gates are a local aid, not a project dependency. Their output (`.metrics/`,
-`target/`) is ignored through git's global ignore file; never add it to `.gitignore`,
+`target/`) belongs in git's global ignore file; never add it to `.gitignore`,
 and do not add the tools or their configuration to tracked project files.

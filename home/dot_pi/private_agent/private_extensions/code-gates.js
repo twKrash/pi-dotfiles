@@ -1,6 +1,6 @@
 // Quality gates from the code-standards skill, run through ~/.local/bin/code-gates:
-// complexity and duplicate findings after each Python/TypeScript edit, the full gates before
-// `git commit`, and an install hint at startup when a tool is missing.
+// complexity and duplicate findings after each Python/TypeScript edit, and the missing setup steps at startup.
+// The commit gate itself is git's pre-commit hook (`code-gates check`).
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -32,11 +32,4 @@ export default function (pi) {
     if (stdout.trim()) return { content: [...(event.content ?? []), { type: "text", text: stdout.trim() }] };
   });
 
-  pi.on("tool_call", async (event, ctx) => {
-    const command = event.input?.command ?? "";
-    // code-gates parses the command; the cheap test skips a process spawn for most bash calls.
-    if (event.toolName !== "bash" || !/\bcommit\b/.test(command)) return;
-    const { code, stdout } = await codeGates(["check", "--command", command], ctx.cwd);
-    if (code === 1) return { block: true, reason: stdout.trim() };
-  });
 }

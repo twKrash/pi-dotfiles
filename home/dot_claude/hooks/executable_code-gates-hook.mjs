@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Claude Code hooks for the code-standards quality gates, run through ~/.local/bin/code-gates:
 //   post-edit       PostToolUse Write|Edit|MultiEdit: complexity and duplicate findings as model context
-//   pre-commit      PreToolUse Bash: blocks `git commit` until the staged code has been gated
-//   session-start   SessionStart: tells the user which tools are missing
-// Every failure fails open: the hook must never wedge edits or commits.
+//   session-start   SessionStart: tells the user which setup steps are missing
+// The commit gate itself is git's pre-commit hook (`code-gates check`). Every failure fails open.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,14 +27,6 @@ if (event === 'post-edit') {
   if (!CODE_FILE.test(file)) process.exit(0);
   const { stdout } = codeGates(['quick', path.resolve(cwd, file)], cwd);
   if (stdout) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: stdout } }));
-} else if (event === 'pre-commit') {
-  const command = input.tool_input?.command ?? '';
-  if (!/\bcommit\b/.test(command)) process.exit(0);
-  const { status, stdout } = codeGates(['check', '--command', command], cwd);
-  if (status === 1) {
-    process.stderr.write(`${stdout}\n`);
-    process.exit(2);
-  }
 } else if (event === 'session-start') {
   const { status, stdout } = codeGates(['doctor'], cwd);
   if (status !== 0 && stdout) process.stdout.write(JSON.stringify({ systemMessage: stdout }));
