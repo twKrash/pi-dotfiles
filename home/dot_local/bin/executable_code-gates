@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+// Runs the code-standards quality gates (crapper, dryer, mutator) for agents.
+//   code-gates quick <file>   complexity and duplicates of one file; prints findings, nothing when clean
+//   code-gates run [--no-mutator] [--test-command C] [--coverage-command C]
+//                             full gates on the staged Python/TypeScript files; marks the staged tree as gated
+//   code-gates check          exit 1 with a message when staged code files have not been gated
+//   code-gates doctor         exit 1 with install commands when a tool is missing
+'use strict';
+const { spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const TOOLS = ['crapper', 'dryer', 'mutator'];
+const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
+const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\/|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|\.(test|spec)\.[cm]?tsx?$/;
+const CACHE = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'code-gates');
+const MAX_CC = 10;
+const MIN_SIMILARITY = '0.8';
+const INSTALL = [
+  'uv tool install git+https://github.com/unclebob/crapper',
+  'uv tool install git+https://github.com/unclebob/dryer',
+  'uv tool install git+https://github.com/unclebob/mutator --with git+https://github.com/unclebob/crapper',
+];
+
+const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...options });
+const git = (cwd, ...args) => {
+  const result = run('git', args, { cwd });
+  return result.status === 0 ? result.stdout.trim() : undefined;
+};
+const missingTools = () => TOOLS.filter((tool) => run('sh', ['-c', `command -v ${tool}`]).status !== 0);
+
+// Functions at or above MAX_CC fail CRAP < 10 at any coverage, since CRAP >= CC.
+function complexFunctions(report) {
+  return report.split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cols) => cols.length >= 5 && /^\d+$/.test(cols.at(-3)) && Number(cols.at(-3)) >= MAX_CC)
+    .map((cols) => `${cols[0]} (CC ${cols.at(-3)})`);
+}
+
+// dryer text: "DUPLICATE score=S" followed by the two "path:start-end" sides.
+function duplicatesOf(report, file) {
+  const pairs = [];
+  const lines = report.split('\n');
+  lines.forEach((line, i) => {
+    const score = line.match(/^DUPLICATE score=([\d.]+)/)?.[1];
+    if (!score) return;
+    const sides = [lines[i + 1], lines[i + 2]].map((side) => (side ?? '').trim());
+    if (sides.some((side) => side.startsWith(`${file}:`))) pairs.push(`${sides.join(' ~ ')} (${score})`);
+  });
+  return pairs;
+}
+
+function quick(file) {
+  if (!file || !CODE_FILE.test(file) || missingTools().length) return 0;
+  const target = path.resolve(file);
+  if (!fs.existsSync(target)) return 0;
+  const repo = git(path.dirname(target), 'rev-parse', '--show-toplevel') ?? path.dirname(target);
+  // Metrics go to a scratch root so the repository is left untouched.
+  const scratch = path.join(CACHE, 'quick', crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12));
+  fs.mkdirSync(scratch, { recursive: true });
+  const complex = complexFunctions(run('crapper', ['--root', scratch, '--no-coverage', target], { timeout: 20000 }).stdout ?? '');
+  const duplicates = duplicatesOf(run('dryer', ['--root', scratch, '--threshold', MIN_SIMILARITY, '-s', repo], { timeout: 20000 }).stdout ?? '', target);
+  const findings = [];
+  if (complex.length) findings.push(`complexity >= ${MAX_CC}: ${complex.slice(0, 5).join(', ')}${complex.length > 5 ? ', ...' : ''}`);
+  if (duplicates.length) findings.push(`duplicates >= ${MIN_SIMILARITY}: ${duplicates.slice(0, 3).join('; ')}${duplicates.length > 3 ? '; ...' : ''}`);
+  if (findings.length) console.log(`code-gates ${path.relative(repo, target)}: ${findings.join(' | ')}`.replaceAll(`${repo}/`, ''));
+  return 0;
+}
+
+// The staged tree hash identifies exactly what a commit would record.
+function stagedState(cwd) {
+  const repo = git(cwd, 'rev-parse', '--show-toplevel');
+  if (!repo) return undefined;
+  const files = (git(repo, 'diff', '--cached', '--name-only', '--diff-filter=AM') ?? '')
+    .split('\n').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
+  const tree = git(repo, 'write-tree');
+  return files.length && tree ? { repo, files, tree } : undefined;
+}
+const markerOf = (tree) => path.join(CACHE, 'ran', tree);
+
+function gate(args) {
+  const missing = missingTools();
+  if (missing.length) return doctor();
+  const state = stagedState(process.cwd());
+  if (!state) {
+    console.log('code-gates: no staged Python or TypeScript source files.');
+    return 0;
+  }
+  const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+  const withOption = (name, list) => (option(name) ? [...list, name, option(name)] : list);
+  const files = state.files.map((file) => path.join(state.repo, file));
+  // Duplicates are searched across the whole repository, then reported for the staged files only.
+  const dry = run('dryer', ['--threshold', MIN_SIMILARITY], { cwd: state.repo });
+  const duplicates = files.flatMap((file) => duplicatesOf(dry.stdout ?? '', file));
+  console.log(`## dryer\n${[...new Set(duplicates)].join('\n').replaceAll(`${state.repo}/`, '') || 'no duplicates involving the staged files'}`);
+  const steps = [['crapper', [...withOption('--coverage-command', []), ...files]]];
+  if (!args.includes('--no-mutator')) steps.push(['mutator', [...withOption('--test-command', []), ...files]]);
+  const statuses = [`dryer exit ${dry.status}`, ...steps.map(([tool, toolArgs]) => {
+    console.log(`\n## ${tool}`);
+    return `${tool} exit ${run(tool, toolArgs, { cwd: state.repo, stdio: 'inherit' }).status}`;
+  })];
+  fs.mkdirSync(path.dirname(markerOf(state.tree)), { recursive: true });
+  fs.writeFileSync(markerOf(state.tree), `${state.repo}\n`);
+  console.log(`\ncode-gates: ran on ${state.files.length} staged file(s) (${statuses.join(', ')}${args.includes('--no-mutator') ? ', mutator skipped' : ''}).`);
+  console.log('Report these results to the user before committing; justify any exception.');
+  return 0;
+}
+
+function check() {
+  const state = stagedState(process.cwd());
+  if (!state || fs.existsSync(markerOf(state.tree)) || missingTools().length) return 0;
+  console.log('Run `code-gates run` (crapper, dryer and mutator on the staged code) and report the results to the user before committing. Restage-and-commit after any change reruns it.');
+  return 1;
+}
+
+function doctor() {
+  const missing = missingTools();
+  if (!missing.length) return 0;
+  console.log(`code-gates: missing ${missing.join(', ')}. Install with:\n  ${INSTALL.join('\n  ')}`);
+  return 1;
+}
+
+const [command, ...args] = process.argv.slice(2);
+const commands = { quick: () => quick(args[0]), run: () => gate(args), check, doctor };
+if (!commands[command]) {
+  console.error('usage: code-gates quick <file> | run [--no-mutator] [--test-command C] [--coverage-command C] | check | doctor');
+  process.exit(2);
+}
+process.exit(commands[command]());

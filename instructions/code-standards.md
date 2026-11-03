@@ -104,6 +104,20 @@ changed code before final review and report the results:
 Justify any remaining exception. These gates test the tests; they do not replace
 the behavioral tests above.
 
-The gates are a local aid, not a project dependency. Keep their output (`.metrics/`,
-`target/`) out of git through `.git/info/exclude`, never `.gitignore`, and do not
-add the tools or their configuration to tracked project files.
+Run them through `code-gates`:
+
+- After each Python or TypeScript edit, a `code-gates` line in the tool result
+  lists functions with complexity 10 or above (CRAP is never below complexity)
+  and duplicates of the edited file. Fix the ones in code you changed.
+- Before committing, stage the change and run `code-gates run` in the repository;
+  a commit of staged code files is blocked until it has run on exactly that
+  staged content. Pass `--test-command` (for example
+  `"uv run pytest -q -x tests/<area>"`) to limit mutator to the matching tests, and
+  `--coverage-command` when the default coverage run does not work for the repository.
+  Use `--no-mutator` only when you tell the user why.
+- Report the results to the user before committing. Only the user may skip the
+  gate (`CODE_GATES_SKIP=1 git commit ...`).
+
+The gates are a local aid, not a project dependency. Their output (`.metrics/`,
+`target/`) is ignored through git's global ignore file; never add it to `.gitignore`,
+and do not add the tools or their configuration to tracked project files.

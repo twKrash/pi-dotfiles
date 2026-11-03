@@ -21,7 +21,7 @@
     "npm:pi-subagents"
   ],
   "subagents": {
-    "defaultSubagentOnlyExtensions": ["~/.pi/agent/extensions/code-standards-guard.js"],
+    "defaultSubagentOnlyExtensions": ["~/.pi/agent/extensions/code-standards-guard.js", "~/.pi/agent/extensions/code-gates.js"],
     "agentOverrides": {
       "delegate": { "thinking": "low" },
       "scout": {

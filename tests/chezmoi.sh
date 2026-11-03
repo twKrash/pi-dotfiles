@@ -120,6 +120,9 @@ mkdir -p "$H/.config/ai-memory"
 mkdir -p "$H/.claude"
 printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]},{"matcher":"Odd","hooks":"malformed"}]}}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
+# An existing global git ignore keeps its lines; the code-gates outputs are added once.
+mkdir -p "$H/.config/git"
+printf '%s\n' 'local-ignore/' '.metrics/' >"$H/.config/git/ignore"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"piInfrastructureReadPaths":["/local/infra"],"permission":{"*":"deny","bash":{"my-local-cmd":"allow"}}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
 printf '%s\n' 'linked rules' >"$TMP/hybrid/linked.md"
@@ -268,7 +271,7 @@ if (JSON.stringify(roles.worker.tools) !== JSON.stringify(['read', 'edit', 'writ
 // The code-standards guard reaches subagents: its skill and extension join local lists.
 if (JSON.stringify(roles.worker.skills) !== JSON.stringify(['local-skill', 'graphify', 'ponytail', 'code-standards'])) throw new Error('worker skills not extended');
 if (!roles.reviewer.skills.includes('code-standards')) throw new Error('reviewer code-standards skill missing');
-if (JSON.stringify(s.subagents.defaultSubagentOnlyExtensions) !== JSON.stringify(['/local/ext.js', '~/.pi/agent/extensions/code-standards-guard.js'])) throw new Error('guard extension not added');
+if (JSON.stringify(s.subagents.defaultSubagentOnlyExtensions) !== JSON.stringify(['/local/ext.js', '~/.pi/agent/extensions/code-standards-guard.js', '~/.pi/agent/extensions/code-gates.js'])) throw new Error('guard and code-gates extensions not added');
 if (!m.mcpServers.local) throw new Error('unrelated MCP server removed');
 if (!m.mcpServers.context7?.url) throw new Error('Context7 missing');
 NODE
@@ -293,7 +296,20 @@ const commands = live.hooks.PreToolUse.flatMap((group) => (Array.isArray(group.h
 if (!commands.includes('local-hook')) throw new Error('local hook lost');
 const guard = repo.hooks.PreToolUse[0].hooks[0].command;
 if (commands.filter((command) => command === guard).length !== 1) throw new Error('guard hook missing or duplicated');
+// Every repo hook event (code-gates adds PostToolUse and SessionStart) is installed exactly once.
+for (const [event, groups] of Object.entries(repo.hooks)) {
+  const installed = live.hooks[event].flatMap((group) => (Array.isArray(group.hooks) ? group.hooks : []).map((hook) => hook.command));
+  for (const hook of groups.flatMap((group) => group.hooks)) {
+    if (installed.filter((command) => command === hook.command).length !== 1) throw new Error(`${event} hook missing or duplicated: ${hook.command}`);
+  }
+}
 NODE
+test "$(cat "$H/.config/git/ignore")" = "$(printf '%s\n' 'local-ignore/' '.metrics/' 'target/')"
+test -x "$H/.local/bin/code-gates"
+cmp "$ROOT/home/dot_local/bin/executable_code-gates" "$H/.local/bin/code-gates"
+test -x "$H/.claude/hooks/code-gates-hook.mjs"
+cmp "$ROOT/home/dot_claude/hooks/executable_code-gates-hook.mjs" "$H/.claude/hooks/code-gates-hook.mjs"
+cmp "$ROOT/home/dot_pi/private_agent/private_extensions/code-gates.js" "$H/.pi/agent/extensions/code-gates.js"
 test -x "$H/.claude/hooks/code-standards-guard.mjs"
 cmp "$ROOT/home/dot_claude/hooks/executable_code-standards-guard.mjs" "$H/.claude/hooks/code-standards-guard.mjs"
 cmp "$ROOT/home/dot_pi/private_agent/private_extensions/code-standards-guard.js" "$H/.pi/agent/extensions/code-standards-guard.js"
