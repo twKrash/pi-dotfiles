@@ -80,11 +80,12 @@ function quick(file) {
 function stagedState(where) {
   const repo = git(where, 'rev-parse', '--show-toplevel');
   if (!repo) return undefined;
-  const files = codeFiles(git(where, 'diff', '--cached', '--name-only', '--no-renames', '--diff-filter=AM'));
+  const files = codeFiles(git(where, 'diff', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=AM'));
   const tree = git(where, 'write-tree');
   return files.length && tree ? { repo, files, tree } : undefined;
 }
-const codeFiles = (list) => (list ?? '').split('\n').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
+// Lists come from `-z` git output: NUL-separated, never quoted (git quotes non-ASCII names otherwise).
+const codeFiles = (list) => (list ?? '').split('\0').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
 const markerOf = (tree) => path.join(CACHE, 'ran', tree);
 
 function gate(args) {
@@ -94,6 +95,12 @@ function gate(args) {
   if (!state) {
     console.log('code-gates: no staged Python or TypeScript source files.');
     return 0;
+  }
+  // The tools read the working tree, so it must hold exactly what is staged.
+  const partial = codeFiles(git(state.repo, 'diff', '--name-only', '-z', '--', ...state.files));
+  if (partial.length) {
+    console.log(`code-gates: ${partial.join(', ')} differ between the index and the working tree; stage or stash those changes, then rerun.`);
+    return 1;
   }
   const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
   const withOption = (name, list) => (option(name) ? [...list, name, option(name)] : list);
@@ -180,7 +187,8 @@ function commitStages(words) {
 // Finds every `git commit` in a command, in order, including inside `sh -c "..."`. Each entry has the git
 // context (repository options and GIT_DIR/GIT_WORK_TREE), whether a value in it cannot be expanded, and whether
 // the commit or an earlier `git add`/`rm`/`mv`/`stage` in the command stages files itself.
-function parseCommits(command, state = { staged: false }) {
+// `inherited` holds the assignments of an enclosing `sh -c` command, which the nested commands inherit.
+function parseCommits(command, state = { staged: false }, inherited = {}) {
   // An unquoted word starting with # comments out the rest of its line.
   const words = (command.replace(/\\\n/g, ' ').match(WORD) ?? [])
     .filter(function (word) { this.comment = word.startsWith('#') || (this.comment && !word.includes('\n')); return !this.comment; }, {});
@@ -192,17 +200,22 @@ function parseCommits(command, state = { staged: false }) {
     start = end + 1;
     // Skip shell keywords and environment assignments to reach the command word; after a wrapper
     // (sudo, timeout, env, ...) with its own options and values, the command is the next git or shell.
+    // Leading redirections are skipped with their target unless it is attached (`2>&1`).
     let i = 0;
-    while (i < segment.length && (KEYWORDS.has(unquote(segment[i])) || ASSIGNMENT.test(unquote(segment[i])))) i++;
+    while (i < segment.length) {
+      if (REDIRECT.test(segment[i])) i += /&(?:\d+|-)$/.test(segment[i]) ? 1 : 2;
+      else if (KEYWORDS.has(unquote(segment[i])) || ASSIGNMENT.test(unquote(segment[i]))) i++;
+      else break;
+    }
     if (WRAPPERS.has(unquote(segment[i] ?? ''))) {
       const next = segment.findIndex((word, k) => k > i && ['git', ...SHELLS].includes(path.basename(unquote(word))));
       i = next < 0 ? segment.length : next;
     }
-    const env = Object.fromEntries(segment.slice(0, i).map((word) => unquote(word).match(ASSIGNMENT)).filter(Boolean).map((m) => [m[1], m[2]]));
+    const env = { ...inherited, ...Object.fromEntries(segment.slice(0, i).filter((word) => !REDIRECT.test(word)).map((word) => unquote(word).match(ASSIGNMENT)).filter(Boolean).map((m) => [m[1], m[2]])) };
     const name = path.basename(unquote(segment[i] ?? ''));
     if (SHELLS.has(name)) {
       const flag = segment.findIndex((word, n) => n > i && /^-[a-z]*c[a-z]*$/.test(unquote(word)));
-      if (flag > 0 && segment[flag + 1]) commits.push(...parseCommits(unquote(segment[flag + 1]), state));
+      if (flag > 0 && segment[flag + 1]) commits.push(...parseCommits(unquote(segment[flag + 1]), state, env));
       continue;
     }
     if (name !== 'git') continue;
@@ -230,6 +243,7 @@ function parseCommits(command, state = { staged: false }) {
     commits.push({
       where: { cwd: process.cwd(), args, env: gitEnv },
       unresolved,
+      skip: env.CODE_GATES_SKIP === '1',
       stages: state.staged || commitStages(segment.slice(j + 1)),
     });
   }
@@ -240,17 +254,17 @@ function parseCommits(command, state = { staged: false }) {
 // shortcut: `cd dir && git commit`, aliases, eval and scripts are not followed; `git -C`, `--git-dir`,
 // `--work-tree`, GIT_DIR and GIT_WORK_TREE are.
 function checkCommand(command) {
-  // CODE_GATES_SKIP=1 is the user's escape hatch.
-  if (/\bCODE_GATES_SKIP=1\b/.test(command) || missingTools().length) return 0;
+  if (missingTools().length) return 0;
   for (const commit of parseCommits(command)) {
-    // A value the shell would expand from something unknown (`$(...)`, unset variables) is let through.
-    if (commit.unresolved) continue;
+    // CODE_GATES_SKIP=1 before the commit is the user's escape hatch. A value the shell would expand
+    // from something unknown (`$(...)`, unset variables) is let through.
+    if (commit.skip || commit.unresolved) continue;
     const { where } = commit;
     // Outside a repository the commit fails on its own.
     if (!git(where, 'rev-parse', '--show-toplevel')) continue;
     if (commit.stages) {
       // The command stages files itself, so the staged tree checked now is not what gets committed.
-      const unstaged = [...codeFiles(git(where, 'diff', '--name-only')), ...codeFiles(git(where, 'ls-files', '--others', '--exclude-standard', '--', ':/'))];
+      const unstaged = [...codeFiles(git(where, 'diff', '--name-only', '-z')), ...codeFiles(git(where, 'ls-files', '-z', '--others', '--exclude-standard', '--', ':/'))];
       if (unstaged.length) {
         console.log('Stage the Python/TypeScript changes in a separate command, run `code-gates run`, report the results to the user, then commit without staging flags or paths.');
         return 1;

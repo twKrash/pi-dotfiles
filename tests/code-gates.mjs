@@ -100,10 +100,18 @@ try {
   fs.writeFileSync(path.join(REPO, 'app.py'), 'print(2)\n');
   sh('git add app.py');
   assert.equal(gates(['check']).status, 1, 'restaged changes must be gated again');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(5)\n');
+  assert.equal(gates(['run', '--no-mutator']).status, 1, 'run refuses while the working tree differs from the staged code');
+  assert.equal(gates(['check']).status, 1, 'a refused run does not gate the staged tree');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(2)\n');
   fs.writeFileSync(LOG, '');
   assert.match(gates(['run', '--no-mutator']).out, /mutator skipped/, '--no-mutator is reported');
   assert.doesNotMatch(log(), /^mutator/m, '--no-mutator skips mutator');
   sh('git reset -q');
+  fs.writeFileSync(path.join(REPO, 'café.py'), 'print(1)\n');
+  sh('git add café.py');
+  assert.equal(gates(['check']).status, 1, 'non-ASCII file names are gated');
+  sh('git rm -q --cached café.py && rm café.py');
 
   // commands that stage and commit at once, and renames
   const command = (cmd) => gates(['check', '--command', cmd]).status;
@@ -116,6 +124,10 @@ try {
   assert.equal(command('git commit --all -m x'), 1, 'commit --all is blocked too');
   assert.equal(command('git commit -m x'), 0, 'a plain commit with nothing staged passes');
   assert.equal(command('CODE_GATES_SKIP=1 git commit -am x'), 0, 'the escape hatch passes');
+  assert.equal(command('CODE_GATES_SKIP=1 sh -c "git commit -am x"'), 0, 'the escape hatch reaches nested shells');
+  assert.equal(command('git commit -am "CODE_GATES_SKIP=1"'), 1, 'the escape hatch in a commit message does not skip');
+  assert.equal(command('>/dev/null git commit -am x'), 1, 'a leading redirection does not hide the commit');
+  assert.equal(command('2>&1 git commit -am x'), 1, 'a leading attached redirection does not hide the commit');
   for (const cmd of [
     'git --no-pager commit -am x', 'git -c "user.name=A B" commit -am x', 'git --git-dir=.git commit -am x',
     'git commit -p -m x', 'git commit --patch -m x', 'git commit --interactive', 'git commit -m x app.py',
@@ -143,6 +155,7 @@ try {
   const elsewhere = (cmd) => gates(['check', '--command', cmd], { cwd: TMP }).status;
   assert.equal(elsewhere(`git --git-dir=${REPO}/.git --work-tree=${REPO} commit -m x`), 1, '--git-dir and --work-tree select the repository');
   assert.equal(elsewhere(`GIT_DIR=${REPO}/.git GIT_WORK_TREE=${REPO} git commit -m x`), 1, 'GIT_DIR and GIT_WORK_TREE select the repository');
+  assert.equal(elsewhere(`GIT_DIR=${REPO}/.git GIT_WORK_TREE=${REPO} sh -c "git commit -m x"`), 1, 'nested shells inherit GIT_DIR and GIT_WORK_TREE');
   assert.equal(elsewhere('git --git-dir=/nonexistent commit -m x'), 0, 'a commit git cannot place in a repository fails on its own');
   assert.equal(elsewhere(`git -C "${REPO}" commit -m x`), 1, 'a quoted -C value is followed');
   assert.equal(elsewhere('git commit -m x'), 0, 'outside a repository a plain commit passes');
