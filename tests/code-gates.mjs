@@ -122,6 +122,8 @@ try {
     'git commit -m x -- app.py', 'sh -c "git commit -am x"', 'bash -lc \'git commit -am x\'',
     'git -c user.name="A B" commit -am x', 'git --git-dir=".git" commit -am x', 'git \\\n commit -am x',
     'git commit -m a && git add app.py && git commit -m b', 'echo "git commit" && git commit -am x',
+    'if git commit -am x; then :; fi', 'timeout 60 git commit -am x', 'sudo -u root git commit -am x', '{ git commit -am x; }',
+    'git --config-env user.name=HOME commit -am x',
   ]) assert.equal(command(cmd), 1, `commits that stage ungated code are blocked: ${cmd}`);
   for (const cmd of [
     'git commit -m "docs: explain git add flow"', 'git commit -F msg.txt', 'git commit --author "A B <a@b>" -m x',
@@ -129,7 +131,8 @@ try {
     'git commit -m x 2>&1 | tail -5', 'git commit -m x >/dev/null', 'git commit -m x > out.txt', 'git commit \\\n -m x',
     'git commit --gpg-sign -m x', 'git commit -uno -m x', 'echo "git commit -am x"', 'grep -rn "git commit -a" README.md',
     'git commit -m "it is GIT_DIR=foo"', 'GIT_AUTHOR_NAME="git commit bot" git commit -m x', 'git -C "$PWD" commit -m x',
-    'git -C $(pwd) commit -m x',
+    'git -C $(pwd) commit -m x', 'git commit -F- <<-EOF', 'git commit -F - <<< "msg"', 'git commit -m x -- >/dev/null',
+    'git commit -m x # add app.py later',
   ]) {
     assert.equal(command(cmd), 0, `option values are not paths or staging: ${cmd}`);
   }

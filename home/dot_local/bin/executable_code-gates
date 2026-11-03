@@ -124,16 +124,17 @@ function check(where = process.cwd()) {
 
 // Shell words: runs of unquoted text, "..." and '...' parts and \-escapes; redirections and
 // separators (; & | ( ) newline) are words of their own.
-const WORD = /\d*(?:&>>?|>>?|<<?|>&|<&)&?-?\d*|(?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|[^\s;&|()<>"'\\])+|[;&|()\n]+/g;
-const REDIRECT = /^\d*(?:&>>?|>>?|<<?|>&|<&)&?-?\d*$/;
+const WORD = /\d*(?:&>>?|>>?|<<<|<<-?|<|>&|<&)&?-?\d*|(?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|[^\s;&|()<>"'\\])+|[;&|()\n]+/g;
+const REDIRECT = /^\d*(?:&>>?|>>?|<<<|<<-?|<|>&|<&)&?-?\d*$/;
 const SEPARATOR = /^[;&|()\n]+$/;
 const unquote = (word) => word.replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'|\\(.)/g, (_, double, single, escaped) =>
   double !== undefined ? double.replace(/\\(.)/g, '$1') : single ?? escaped);
 const ASSIGNMENT = /^([A-Za-z_]\w*)=([\s\S]*)$/;
-const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'time', 'builtin', 'xargs']);
+const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'time', 'builtin', 'xargs', 'sudo', 'doas', 'nice', 'timeout', 'stdbuf', 'ionice']);
+const KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', '{']);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 // git global options whose value may be the next word; -C, --git-dir and --work-tree choose the repository.
-const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--attr-source']);
 const REPO_OPTIONS = new Set(['-C', '--git-dir', '--work-tree']);
 // Short commit options: value letters take the rest of the word or the next word; attached-value
 // letters (-u<mode>, -S<key>) take only the rest of the word; stage letters commit files from disk.
@@ -151,10 +152,15 @@ function expand(value) {
 }
 
 // Whether a commit's arguments make it commit files that are not staged yet.
-function commitStages(args) {
+function commitStages(words) {
+  // Redirections go first, with their target unless it is attached (`2>&1`, `>&-`).
+  const args = [];
+  for (let k = 0; k < words.length; k++) {
+    if (!REDIRECT.test(words[k])) args.push(words[k]);
+    else if (!/&(?:\d+|-)$/.test(words[k])) k++;
+  }
   for (let k = 0; k < args.length; k++) {
     const arg = unquote(args[k]);
-    if (REDIRECT.test(args[k])) { if (!/\d$|-$/.test(args[k])) k++; continue; }
     if (arg === '--') return k + 1 < args.length;
     if (arg.startsWith('--')) {
       const name = arg.split('=')[0];
@@ -175,22 +181,24 @@ function commitStages(args) {
 // context (repository options and GIT_DIR/GIT_WORK_TREE), whether a value in it cannot be expanded, and whether
 // the commit or an earlier `git add`/`rm`/`mv`/`stage` in the command stages files itself.
 function parseCommits(command, state = { staged: false }) {
-  const words = command.replace(/\\\n/g, ' ').match(WORD) ?? [];
+  // An unquoted word starting with # comments out the rest of its line.
+  const words = (command.replace(/\\\n/g, ' ').match(WORD) ?? [])
+    .filter(function (word) { this.comment = word.startsWith('#') || (this.comment && !word.includes('\n')); return !this.comment; }, {});
   const commits = [];
   for (let start = 0; start < words.length;) {
     let end = start;
     while (end < words.length && !SEPARATOR.test(words[end])) end++;
     const segment = words.slice(start, end);
     start = end + 1;
-    // Skip environment assignments and wrappers to reach the command word.
-    const env = {};
+    // Skip shell keywords and environment assignments to reach the command word; after a wrapper
+    // (sudo, timeout, env, ...) with its own options and values, the command is the next git or shell.
     let i = 0;
-    for (; i < segment.length; i++) {
-      const word = unquote(segment[i]);
-      const assignment = word.match(ASSIGNMENT);
-      if (assignment) env[assignment[1]] = assignment[2];
-      else if (!WRAPPERS.has(word) && !(i > 0 && WRAPPERS.has(unquote(segment[i - 1])) && word.startsWith('-'))) break;
+    while (i < segment.length && (KEYWORDS.has(unquote(segment[i])) || ASSIGNMENT.test(unquote(segment[i])))) i++;
+    if (WRAPPERS.has(unquote(segment[i] ?? ''))) {
+      const next = segment.findIndex((word, k) => k > i && ['git', ...SHELLS].includes(path.basename(unquote(word))));
+      i = next < 0 ? segment.length : next;
     }
+    const env = Object.fromEntries(segment.slice(0, i).map((word) => unquote(word).match(ASSIGNMENT)).filter(Boolean).map((m) => [m[1], m[2]]));
     const name = path.basename(unquote(segment[i] ?? ''));
     if (SHELLS.has(name)) {
       const flag = segment.findIndex((word, n) => n > i && /^-[a-z]*c[a-z]*$/.test(unquote(word)));
