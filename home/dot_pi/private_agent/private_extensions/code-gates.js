@@ -8,8 +8,6 @@ import path from "node:path";
 
 const CODE_GATES = path.join(os.homedir(), ".local/bin/code-gates");
 const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
-// shortcut: `cd dir && git commit` is checked in the session cwd; only `git -C dir` is followed.
-const COMMIT = /(?:^|[\s;&|(])git((?:\s+-[cC]\s+\S+)*)\s+commit(?![-\w])/;
 
 // Resolves with exit code and stdout; a missing or failing code-gates is never an error here.
 const codeGates = (args, cwd, signal) =>
@@ -36,11 +34,9 @@ export default function (pi) {
 
   pi.on("tool_call", async (event, ctx) => {
     const command = event.input?.command ?? "";
-    const commit = event.toolName === "bash" ? command.match(COMMIT) : null;
-    // CODE_GATES_SKIP=1 is the user's escape hatch.
-    if (!commit || /\bCODE_GATES_SKIP=1\b/.test(command)) return;
-    const dir = commit[1].match(/-C\s+(\S+)/)?.[1];
-    const { code, stdout } = await codeGates(["check"], dir ? path.resolve(ctx.cwd, dir) : ctx.cwd);
+    // code-gates parses the command; the cheap test skips a process spawn for most bash calls.
+    if (event.toolName !== "bash" || !/\bcommit\b/.test(command)) return;
+    const { code, stdout } = await codeGates(["check", "--command", command], ctx.cwd);
     if (code === 1) return { block: true, reason: stdout.trim() };
   });
 }

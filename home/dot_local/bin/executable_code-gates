@@ -3,7 +3,9 @@
 //   code-gates quick <file>   complexity and duplicates of one file; prints findings, nothing when clean
 //   code-gates run [--no-mutator] [--test-command C] [--coverage-command C]
 //                             full gates on the staged Python/TypeScript files; marks the staged tree as gated
-//   code-gates check          exit 1 with a message when staged code files have not been gated
+//   code-gates check [--command CMD]
+//                             exit 1 with a message when staged code files have not been gated, or when
+//                             the shell command CMD would commit ungated code
 //   code-gates doctor         exit 1 with install commands when a tool is missing
 'use strict';
 const { spawnSync } = require('node:child_process');
@@ -39,14 +41,15 @@ function complexFunctions(report) {
     .map((cols) => `${cols[0]} (CC ${cols.at(-3)})`);
 }
 
-// dryer text: "DUPLICATE score=S" followed by the two "path:start-end" sides.
-function duplicatesOf(report, file) {
+// dryer text: "DUPLICATE score=S" followed by the two "path:start-end" sides, with paths
+// relative to dryer's --root (the working directory by default) or absolute outside it.
+function duplicatesOf(report, file, root) {
   const pairs = [];
   const lines = report.split('\n');
   lines.forEach((line, i) => {
     const score = line.match(/^DUPLICATE score=([\d.]+)/)?.[1];
     if (!score) return;
-    const sides = [lines[i + 1], lines[i + 2]].map((side) => (side ?? '').trim());
+    const sides = [lines[i + 1], lines[i + 2]].map((side) => path.resolve(root, (side ?? '').trim()));
     if (sides.some((side) => side.startsWith(`${file}:`))) pairs.push(`${sides.join(' ~ ')} (${score})`);
   });
   return pairs;
@@ -54,14 +57,16 @@ function duplicatesOf(report, file) {
 
 function quick(file) {
   if (!file || !CODE_FILE.test(file) || missingTools().length) return 0;
-  const target = path.resolve(file);
-  if (!fs.existsSync(target)) return 0;
+  if (!fs.existsSync(path.resolve(file))) return 0;
+  // git and dryer report symlink-free paths, so the file must be compared in that form.
+  const target = fs.realpathSync(path.resolve(file));
   const repo = git(path.dirname(target), 'rev-parse', '--show-toplevel') ?? path.dirname(target);
   // Metrics go to a scratch root so the repository is left untouched.
   const scratch = path.join(CACHE, 'quick', crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12));
   fs.mkdirSync(scratch, { recursive: true });
-  const complex = complexFunctions(run('crapper', ['--root', scratch, '--no-coverage', target], { timeout: 20000 }).stdout ?? '');
-  const duplicates = duplicatesOf(run('dryer', ['--root', scratch, '--threshold', MIN_SIMILARITY, '-s', repo], { timeout: 20000 }).stdout ?? '', target);
+  // Both tools together stay under the hooks' 30 s timeout.
+  const complex = complexFunctions(run('crapper', ['--root', scratch, '--no-coverage', target], { timeout: 12000 }).stdout ?? '');
+  const duplicates = duplicatesOf(run('dryer', ['--root', scratch, '--threshold', MIN_SIMILARITY, '-s', repo], { timeout: 12000 }).stdout ?? '', target, scratch);
   const findings = [];
   if (complex.length) findings.push(`complexity >= ${MAX_CC}: ${complex.slice(0, 5).join(', ')}${complex.length > 5 ? ', ...' : ''}`);
   if (duplicates.length) findings.push(`duplicates >= ${MIN_SIMILARITY}: ${duplicates.slice(0, 3).join('; ')}${duplicates.length > 3 ? '; ...' : ''}`);
@@ -73,11 +78,11 @@ function quick(file) {
 function stagedState(cwd) {
   const repo = git(cwd, 'rev-parse', '--show-toplevel');
   if (!repo) return undefined;
-  const files = (git(repo, 'diff', '--cached', '--name-only', '--diff-filter=AM') ?? '')
-    .split('\n').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
+  const files = codeFiles(git(repo, 'diff', '--cached', '--name-only', '--no-renames', '--diff-filter=AM'));
   const tree = git(repo, 'write-tree');
   return files.length && tree ? { repo, files, tree } : undefined;
 }
+const codeFiles = (list) => (list ?? '').split('\n').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
 const markerOf = (tree) => path.join(CACHE, 'ran', tree);
 
 function gate(args) {
@@ -92,8 +97,8 @@ function gate(args) {
   const withOption = (name, list) => (option(name) ? [...list, name, option(name)] : list);
   const files = state.files.map((file) => path.join(state.repo, file));
   // Duplicates are searched across the whole repository, then reported for the staged files only.
-  const dry = run('dryer', ['--threshold', MIN_SIMILARITY], { cwd: state.repo });
-  const duplicates = files.flatMap((file) => duplicatesOf(dry.stdout ?? '', file));
+  const dry = run('dryer', ['--threshold', MIN_SIMILARITY, '-s', state.repo], { cwd: state.repo });
+  const duplicates = files.flatMap((file) => duplicatesOf(dry.stdout ?? '', file, state.repo));
   console.log(`## dryer\n${[...new Set(duplicates)].join('\n').replaceAll(`${state.repo}/`, '') || 'no duplicates involving the staged files'}`);
   const steps = [['crapper', [...withOption('--coverage-command', []), ...files]]];
   if (!args.includes('--no-mutator')) steps.push(['mutator', [...withOption('--test-command', []), ...files]]);
@@ -108,24 +113,58 @@ function gate(args) {
   return 0;
 }
 
-function check() {
-  const state = stagedState(process.cwd());
+function check(cwd = process.cwd()) {
+  const state = stagedState(cwd);
   if (!state || fs.existsSync(markerOf(state.tree)) || missingTools().length) return 0;
   console.log('Run `code-gates run` (crapper, dryer and mutator on the staged code) and report the results to the user before committing. Restage-and-commit after any change reruns it.');
   return 1;
 }
 
+const COMMIT = /(?:^|[\s;&|(])git((?:\s+-[cC]\s+\S+)*)\s+commit(?![-\w])/;
+const STAGING = /(?:^|[\s;&|(])git(?:\s+-[cC]\s+\S+)*\s+(?:add|rm|mv|stage)(?![-\w])/;
+const COMMIT_STAGES = /\s(?:-[A-Za-z]*[aio][A-Za-z]*|--(?:all|include|only))(?=\s|$)/;
+
+// Decides for an agent's shell command whether it would commit ungated code.
+// shortcut: `cd dir && git commit` and `git commit <pathspec>` are not followed; only `git -C dir` and staging flags are.
+function checkCommand(command) {
+  const commit = command.match(COMMIT);
+  // CODE_GATES_SKIP=1 is the user's escape hatch.
+  if (!commit || /\bCODE_GATES_SKIP=1\b/.test(command) || missingTools().length) return 0;
+  const dir = commit[1].match(/-C\s+(\S+)/)?.[1];
+  const cwd = dir ? path.resolve(dir) : process.cwd();
+  const commitArgs = command.slice(commit.index + commit[0].length).split(/[;&|]/)[0];
+  if (STAGING.test(command) || COMMIT_STAGES.test(commitArgs)) {
+    // The command stages files itself, so the staged tree checked now is not what gets committed.
+    const repo = git(cwd, 'rev-parse', '--show-toplevel');
+    const unstaged = repo ? [...codeFiles(git(repo, 'diff', '--name-only')), ...codeFiles(git(repo, 'ls-files', '--others', '--exclude-standard'))] : [];
+    if (unstaged.length) {
+      console.log('Stage the Python/TypeScript changes in a separate command, run `code-gates run`, report the results to the user, then commit without staging flags.');
+      return 1;
+    }
+  }
+  return check(cwd);
+}
+
 function doctor() {
   const missing = missingTools();
-  if (!missing.length) return 0;
-  console.log(`code-gates: missing ${missing.join(', ')}. Install with:\n  ${INSTALL.join('\n  ')}`);
-  return 1;
+  const lines = missing.length ? [`code-gates: missing ${missing.join(', ')}. Install with:\n  ${INSTALL.join('\n  ')}`] : [];
+  // The .metrics/ and target/ ignores live in ~/.config/git/ignore, which git skips in these cases.
+  if (git(os.homedir(), 'config', '--global', 'core.excludesFile') || process.env.XDG_CONFIG_HOME) {
+    lines.push('code-gates: git reads a global ignore file other than ~/.config/git/ignore (core.excludesFile or XDG_CONFIG_HOME is set); add .metrics/ and target/ to it.');
+  }
+  if (lines.length) console.log(lines.join('\n'));
+  return lines.length ? 1 : 0;
 }
 
 const [command, ...args] = process.argv.slice(2);
-const commands = { quick: () => quick(args[0]), run: () => gate(args), check, doctor };
+const commands = {
+  quick: () => quick(args[0]),
+  run: () => gate(args),
+  check: () => (args[0] === '--command' ? checkCommand(args[1] ?? '') : check()),
+  doctor,
+};
 if (!commands[command]) {
-  console.error('usage: code-gates quick <file> | run [--no-mutator] [--test-command C] [--coverage-command C] | check | doctor');
+  console.error('usage: code-gates quick <file> | run [--no-mutator] [--test-command C] [--coverage-command C] | check [--command CMD] | doctor');
   process.exit(2);
 }
 process.exit(commands[command]());

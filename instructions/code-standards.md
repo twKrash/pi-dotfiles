@@ -109,9 +109,10 @@ Run them through `code-gates`:
 - After each Python or TypeScript edit, a `code-gates` line in the tool result
   lists functions with complexity 10 or above (CRAP is never below complexity)
   and duplicates of the edited file. Fix the ones in code you changed.
-- Before committing, stage the change and run `code-gates run` in the repository;
-  a commit of staged code files is blocked until it has run on exactly that
-  staged content. Pass `--test-command` (for example
+- Before committing, stage the change in its own command and run `code-gates run`
+  in the repository; a commit of staged code files is blocked until it has run on
+  exactly that staged content, and so is a commit command that stages ungated
+  code itself (`git add ... && git commit`, `git commit -a`). Pass `--test-command` (for example
   `"uv run pytest -q -x tests/<area>"`) to limit mutator to the matching tests, and
   `--coverage-command` when the default coverage run does not work for the repository.
   Use `--no-mutator` only when you tell the user why.

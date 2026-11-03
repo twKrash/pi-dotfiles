@@ -26,23 +26,30 @@ Function   Namespace   CC    Cov%     CRAP
 big_fn     .x.app      14    N/A      N/A
 small_fn   .x.app       6    N/A      N/A
 E`);
-fake('dryer', `cat <<E
+// Like the real dryer: paths are relative to --root (default: the working directory), absolute outside it.
+fake('dryer', `root=$PWD; src=$PWD; prev=; for a in "$@"; do [ "$prev" = --root ] && root=$a; [ "$prev" = -s ] && src=$a; prev=$a; done
+if [ "$src" = "$root" ]; then p=; else case "$src" in "$root"/*) p="\${src#"$root"/}/";; *) p="$src/";; esac; fi
+cat <<E
 DUPLICATE score=0.95
-  ${REPO}/app.py:1-4
-  ${REPO}/other.py:5-8
+  \${p}app.py:1-4
+  \${p}other.py:5-8
 
 DUPLICATE score=0.90
-  ${REPO}/x.py:1-4
-  ${REPO}/y.py:1-4
+  \${p}x.py:1-4
+  \${p}y.py:1-4
 E`);
 fake('mutator', 'true');
 fs.mkdirSync(path.dirname(CODE_GATES), { recursive: true });
 fs.copyFileSync(path.join(ROOT, 'home/dot_local/bin/executable_code-gates'), CODE_GATES);
 fs.chmodSync(CODE_GATES, 0o755);
 
-const env = (PATH) => ({ ...process.env, HOME, PATH, XDG_CACHE_HOME: path.join(TMP, 'cache') });
-const gates = (args, { cwd = REPO, PATH = WITH_TOOLS } = {}) => {
-  const result = spawnSync(CODE_GATES, args, { cwd, env: env(PATH), encoding: 'utf8' });
+const env = (PATH) => {
+  const vars = { ...process.env, HOME, PATH, XDG_CACHE_HOME: path.join(TMP, 'cache') };
+  delete vars.XDG_CONFIG_HOME;
+  return vars;
+};
+const gates = (args, { cwd = REPO, PATH = WITH_TOOLS, extra = {} } = {}) => {
+  const result = spawnSync(CODE_GATES, args, { cwd, env: { ...env(PATH), ...extra }, encoding: 'utf8' });
   return { status: result.status, out: result.stdout };
 };
 const sh = (command) => spawnSync('sh', ['-c', command], { cwd: REPO, env: env(WITH_TOOLS), encoding: 'utf8' });
@@ -58,6 +65,9 @@ try {
   const doctor = gates(['doctor'], { PATH: BASE_PATH });
   assert.equal(doctor.status, 1, 'doctor fails when tools are missing');
   assert.match(doctor.out, /missing crapper, dryer, mutator[\s\S]*uv tool install/, 'doctor prints install commands');
+  const xdg = gates(['doctor'], { extra: { XDG_CONFIG_HOME: path.join(TMP, 'xdg') } });
+  assert.equal(xdg.status, 1, 'doctor warns when git reads another global ignore file');
+  assert.match(xdg.out, /add \.metrics\/ and target\//);
 
   // quick
   const quick = gates(['quick', path.join(REPO, 'app.py')]).out;
@@ -65,6 +75,8 @@ try {
   assert.doesNotMatch(quick, /small_fn/, 'simple functions are not');
   assert.match(quick, /app\.py:1-4 ~ other\.py:5-8 \(0\.95\)/, 'duplicates of the file are reported repo-relative');
   assert.doesNotMatch(quick, /x\.py/, 'duplicates of other files are not');
+  fs.symlinkSync(REPO, path.join(TMP, 'link'));
+  assert.match(gates(['quick', path.join(TMP, 'link/app.py')]).out, /app\.py:1-4 ~ other\.py:5-8/, 'a symlinked path still finds duplicates');
   assert.equal(gates(['quick', path.join(REPO, 'README.md')]).out, '', 'non-code files are skipped');
   assert.equal(gates(['quick', path.join(REPO, 'app.py')], { PATH: BASE_PATH }).out, '', 'missing tools stay silent');
   assert.equal(sh('git status --porcelain').stdout, '?? app.py\n', 'quick leaves the repository untouched');
@@ -93,6 +105,26 @@ try {
   assert.doesNotMatch(log(), /^mutator/m, '--no-mutator skips mutator');
   sh('git reset -q');
 
+  // commands that stage and commit at once, and renames
+  const command = (cmd) => gates(['check', '--command', cmd]).status;
+  assert.equal(command('git add app.py && git commit -m x'), 1, 'staging ungated code in the commit command is blocked');
+  assert.equal(command('git status'), 0, 'non-commit commands pass');
+  sh('git add app.py && git commit -qm app');
+  assert.equal(command('git add README.md && git commit -m x'), 0, 'staging with no unstaged code changes passes');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(3)\n');
+  assert.equal(command('git commit -am x'), 1, 'commit -a with ungated tracked code is blocked');
+  assert.equal(command('git commit --all -m x'), 1, 'commit --all is blocked too');
+  assert.equal(command('git commit -m x'), 0, 'a plain commit with nothing staged passes');
+  assert.equal(command('CODE_GATES_SKIP=1 git commit -am x'), 0, 'the escape hatch passes');
+  sh('git checkout -q app.py && git mv app.py moved.py && git commit -qm move');
+  fs.writeFileSync(path.join(REPO, 'moved.py'), Array.from({ length: 20 }, (_, i) => `x${i} = ${i}\n`).join(''));
+  sh('git commit -qam fill && git mv moved.py renamed.py && echo "y = 1" >>renamed.py && git add renamed.py');
+  assert.match(sh('git diff --cached --name-status').stdout, /^R/, 'the fixture is a detected rename');
+  assert.equal(gates(['check']).status, 1, 'a renamed and edited file must be gated');
+  sh('git reset -q && git checkout -q -- . && rm renamed.py && git mv moved.py app.py && git commit -qm back');
+  assert.equal(sh('git status --porcelain -uno').stdout, '', 'tracked files are clean again');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(5)\n');
+
   // Pi extension
   process.env.HOME = HOME;
   process.env.PATH = WITH_TOOLS;
@@ -114,6 +146,9 @@ try {
   assert.equal(await commit('CODE_GATES_SKIP=1 git commit -m x'), undefined, 'the escape hatch passes');
   assert.equal(await commit('git status && git log'), undefined, 'other git commands pass');
   assert.equal(await commit('git commit-tree HEAD^{tree}'), undefined, 'git commit-tree is not a commit');
+  sh('git reset -q');
+  assert.equal((await commit('git add app.py && git commit -m x'))?.block, true, 'staging and committing at once is blocked');
+  sh('git add app.py');
   await handlers.session_start({}, ctx);
   assert.deepEqual(notes, [], 'no notice when the tools are installed');
   process.env.PATH = BASE_PATH;
@@ -137,6 +172,7 @@ try {
   assert.match(pre.err, /code-gates run/);
   assert.equal(hook('pre-commit', { tool_input: { command: 'CODE_GATES_SKIP=1 git commit -m x' } }).status, 0, 'the escape hatch passes');
   assert.equal(hook('pre-commit', { tool_input: { command: 'ls' } }).status, 0, 'other commands pass');
+  assert.equal(hook('pre-commit', { tool_input: { command: 'git commit -am x' } }).status, 2, 'commit -a is checked');
   gates(['run', '--no-mutator']);
   assert.equal(hook('pre-commit', { tool_input: { command: 'git commit -m x' } }).status, 0, 'a gated commit passes');
   assert.match(JSON.parse(hook('session-start', {}, BASE_PATH).out).systemMessage, /uv tool install/, 'missing tools are announced');

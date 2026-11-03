@@ -11,8 +11,6 @@ import path from 'node:path';
 
 const CODE_GATES = path.join(os.homedir(), '.local/bin/code-gates');
 const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
-// shortcut: `cd dir && git commit` is checked in the hook cwd; only `git -C dir` is followed.
-const COMMIT = /(?:^|[\s;&|(])git((?:\s+-[cC]\s+\S+)*)\s+commit(?![-\w])/;
 
 const codeGates = (args, cwd) => {
   if (!fs.existsSync(CODE_GATES)) return { status: 0, stdout: '' };
@@ -32,11 +30,8 @@ if (event === 'post-edit') {
   if (stdout) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: stdout } }));
 } else if (event === 'pre-commit') {
   const command = input.tool_input?.command ?? '';
-  const commit = command.match(COMMIT);
-  // CODE_GATES_SKIP=1 is the user's escape hatch.
-  if (!commit || /\bCODE_GATES_SKIP=1\b/.test(command)) process.exit(0);
-  const dir = commit[1].match(/-C\s+(\S+)/)?.[1];
-  const { status, stdout } = codeGates(['check'], dir ? path.resolve(cwd, dir) : cwd);
+  if (!/\bcommit\b/.test(command)) process.exit(0);
+  const { status, stdout } = codeGates(['check', '--command', command], cwd);
   if (status === 1) {
     process.stderr.write(`${stdout}\n`);
     process.exit(2);
