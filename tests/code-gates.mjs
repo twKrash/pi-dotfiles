@@ -78,6 +78,11 @@ try {
   fs.symlinkSync(REPO, path.join(TMP, 'link'));
   assert.match(gates(['quick', path.join(TMP, 'link/app.py')]).out, /app\.py:1-4 ~ other\.py:5-8/, 'a symlinked path still finds duplicates');
   assert.equal(gates(['quick', path.join(REPO, 'README.md')]).out, '', 'non-code files are skipped');
+  fs.mkdirSync(path.join(TMP, 'loose'));
+  fs.writeFileSync(path.join(TMP, 'loose', 'free.py'), 'print(1)\n');
+  fs.writeFileSync(LOG, '');
+  gates(['quick', path.join(TMP, 'loose', 'free.py')]);
+  assert.doesNotMatch(log(), /^dryer/m, 'outside a repository quick does not search a tree for duplicates');
   assert.equal(gates(['quick', path.join(REPO, 'app.py')], { PATH: BASE_PATH }).out, '', 'missing tools stay silent');
   assert.equal(sh('git status --porcelain').stdout, '?? app.py\n', 'quick leaves the repository untouched');
 
@@ -152,6 +157,9 @@ try {
   for (const cmd of ['git --no-pager commit -m x', 'git -c "user.name=A B" commit -m x', 'sh -c "git commit -m x"']) {
     assert.equal(command(cmd), 1, `global options and nested shells are followed: ${cmd}`);
   }
+  for (const cmd of ['x=$((1<<2))\ngit commit -m x', 'python3 -c "print(1<<2)"\ngit commit -m x']) {
+    assert.equal(command(cmd), 1, `<< outside a heredoc hides nothing: ${cmd}`);
+  }
   const elsewhere = (cmd) => gates(['check', '--command', cmd], { cwd: TMP }).status;
   assert.equal(elsewhere(`git --git-dir=${REPO}/.git --work-tree=${REPO} commit -m x`), 1, '--git-dir and --work-tree select the repository');
   assert.equal(elsewhere(`GIT_DIR=${REPO}/.git GIT_WORK_TREE=${REPO} git commit -m x`), 1, 'GIT_DIR and GIT_WORK_TREE select the repository');
@@ -169,7 +177,10 @@ try {
   for (const cmd of ["echo 'a=3' >app.py && git commit -am x", 'sed -i.bak s/4/5/ app.py && git add app.py && git commit -m x', 'git checkout HEAD -- app.py && git commit -m x']) {
     assert.equal(command(cmd), 1, `earlier commands that change what is committed are blocked: ${cmd}`);
   }
-  for (const cmd of ['git commit -m x', 'git status && git commit -am x', 'echo hi && git commit -m x']) {
+  for (const cmd of [
+    'git commit -m x', 'git status && git commit -am x', 'echo hi && git commit -m x', 'git checkout -b docs-update && git commit -m x',
+    'git switch -c docs && git commit -m x', 'git stash list && git commit -m x', 'git ls-tree HEAD && git rev-list -1 HEAD && git commit -m x',
+  ]) {
     assert.equal(command(cmd), 0, `the gated tree commits: ${cmd}`);
   }
   fs.writeFileSync(path.join(REPO, 'app.py'), 'print(6)\n');
@@ -181,11 +192,29 @@ try {
   fs.writeFileSync(path.join(REPO, 'scratch.py'), 'print(1)\n');
   fs.appendFileSync(path.join(REPO, 'README.md'), 'more\n');
   assert.equal(command('git commit -am docs'), 0, 'commit -a ignores untracked code it would not commit');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(8)\n');
+  for (const cmd of [
+    `git add README.md && git commit -m "$(cat <<'EOF'\ndocs\nEOF\n)"`, 'git status && git add NOTES.md && git commit -m "docs: notes"', 'git commit -m docs README.md',
+  ]) assert.equal(command(cmd), 0, `staging other files ignores unrelated dirty or untracked code: ${cmd}`);
+  assert.equal(command('git add scratch.py && git commit -m x'), 1, 'git add of untracked code is blocked');
+  sh('git checkout -q app.py && mkdir -p gen && echo "print(1)" >gen/mod.py && echo gen/ >>.git/info/exclude');
+  assert.equal(command('git add -f gen/mod.py && git commit -m x'), 1, 'a forced add of ignored code is blocked');
+  assert.equal(command('git add -A && git commit -m x'), 1, 'git add -A of untracked code is blocked');
+  sh('rm -r gen && sed -i.bak /gen/d .git/info/exclude');
   fs.unlinkSync(path.join(REPO, 'app.py'));
   assert.equal(command('git commit -am drop'), 0, 'commit -a ignores deleted code');
   sh('git checkout -q -- . && rm scratch.py && cp .git/index .git/alt && echo "print(7)" >app.py && GIT_INDEX_FILE=.git/alt git add app.py && git checkout -q app.py');
   assert.equal(command('GIT_INDEX_FILE=.git/alt git commit -m x'), 1, 'GIT_INDEX_FILE selects the index that is checked');
   sh('rm .git/alt app.py.bak 2>/dev/null; git reset -q');
+  fs.mkdirSync(path.join(REPO, 'web/[id]'), { recursive: true });
+  fs.mkdirSync(path.join(REPO, 'web/d'), { recursive: true });
+  fs.writeFileSync(path.join(REPO, 'web/d/page.tsx'), 'export {}\n');
+  sh('git add web && git commit -qm web');
+  fs.writeFileSync(path.join(REPO, 'web/[id]/page.tsx'), 'export {}\n');
+  fs.writeFileSync(path.join(REPO, 'web/d/page.tsx'), 'export const d = 1\n');
+  sh("git --literal-pathspecs add 'web/[id]/page.tsx'");
+  assert.equal(gates(['run', '--no-mutator']).status, 0, 'staged paths with glob characters are compared literally');
+  sh('git reset -q && git checkout -q web && rm -r "web/[id]"');
   sh('git checkout -q app.py && git mv app.py moved.py && git commit -qm move');
   fs.writeFileSync(path.join(REPO, 'moved.py'), Array.from({ length: 20 }, (_, i) => `x${i} = ${i}\n`).join(''));
   sh('git commit -qam fill && git mv moved.py renamed.py && echo "y = 1" >>renamed.py && git add renamed.py');
