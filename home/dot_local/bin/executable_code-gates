@@ -1,0 +1,183 @@
+#!/usr/bin/env node
+// Runs the code-standards quality gates (crapper, dryer, mutator) for agents.
+//   code-gates quick <file>   complexity and duplicates of one file; prints findings, nothing when clean
+//   code-gates run [--no-mutator] [--test-command C] [--coverage-command C]
+//                             full gates on the staged Python/TypeScript files; marks the staged tree as gated
+//   code-gates check          git pre-commit hook: exit 1 with a message when an agent commits staged code
+//                             files that have not been gated
+//   code-gates doctor         exit 1 with the setup commands for missing tools, the hook and the git ignore
+'use strict';
+const { spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const TOOLS = ['crapper', 'dryer', 'mutator'];
+const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
+const TEST_FILE = /(^|\/)(tests?|__tests__)\/|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|\.(test|spec)\.[cm]?tsx?$/;
+const CACHE = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'code-gates');
+const AGENT_ENV = ['PI_CODING_AGENT', 'CLAUDECODE'];
+const HOOK = 'code-gates';
+// Without code-gates installed the hook passes, so a leftover git config never blocks commits.
+const HOOK_COMMAND = '! command -v code-gates >/dev/null || code-gates check';
+// Where crapper and mutator write their output.
+const TOOL_OUTPUT = ['.metrics/', 'target/'];
+const MAX_CC = 10;
+const MIN_SIMILARITY = '0.8';
+const INSTALL = [
+  'uv tool install git+https://github.com/unclebob/crapper',
+  'uv tool install git+https://github.com/unclebob/dryer',
+  'uv tool install git+https://github.com/unclebob/mutator --with git+https://github.com/unclebob/crapper',
+];
+
+const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...options });
+const git = (cwd, ...args) => {
+  const result = run('git', args, { cwd });
+  return result.status === 0 ? result.stdout.trim() : undefined;
+};
+// dryer does not read .gitignore, so it gets the source files git would track.
+const sourceFiles = (repo) => codeFiles(git(repo, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'))
+  .map((file) => path.join(repo, file)).filter((file) => fs.existsSync(file));
+const missingTools = () => TOOLS.filter((tool) => run('sh', ['-c', `command -v ${tool}`]).status !== 0);
+
+// Functions at or above MAX_CC fail CRAP < 10 at any coverage, since CRAP >= CC.
+function complexFunctions(report) {
+  return report.split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cols) => cols.length >= 5 && /^\d+$/.test(cols.at(-3)) && Number(cols.at(-3)) >= MAX_CC)
+    .map((cols) => `${cols[0]} (CC ${cols.at(-3)})`);
+}
+
+// dryer text: "DUPLICATE score=S" followed by the two "path:start-end" sides, with paths
+// relative to dryer's --root (the working directory by default) or absolute outside it.
+function duplicatesOf(report, file, root) {
+  const pairs = [];
+  const lines = report.split('\n');
+  lines.forEach((line, i) => {
+    const score = line.match(/^DUPLICATE score=([\d.]+)/)?.[1];
+    if (!score) return;
+    const sides = [lines[i + 1], lines[i + 2]].map((side) => path.resolve(root, (side ?? '').trim()));
+    if (sides.some((side) => side.startsWith(`${file}:`))) pairs.push(`${sides.join(' ~ ')} (${score})`);
+  });
+  return pairs;
+}
+
+function quick(file) {
+  if (!file || !CODE_FILE.test(file) || missingTools().length) return 0;
+  if (!fs.existsSync(path.resolve(file))) return 0;
+  // git and dryer report symlink-free paths, so the file must be compared in that form.
+  const target = fs.realpathSync(path.resolve(file));
+  const root = git(path.dirname(target), 'rev-parse', '--show-toplevel');
+  const repo = root ?? path.dirname(target);
+  // Metrics go to a scratch root so the repository is left untouched.
+  const scratch = path.join(CACHE, 'quick', idOf(repo));
+  fs.mkdirSync(scratch, { recursive: true });
+  // Both tools together stay under the hooks' 30 s timeout.
+  const crap = run('crapper', ['--root', scratch, '--no-coverage', target], { timeout: 12000 });
+  // Outside a repository there is no bounded tree to search for duplicates.
+  const dry = root && run('dryer', ['--root', scratch, '--threshold', MIN_SIMILARITY, ...sourceFiles(repo)], { timeout: 12000 });
+  const complex = complexFunctions(crap.stdout ?? '');
+  const duplicates = dry ? duplicatesOf(dry.stdout ?? '', target, scratch) : [];
+  const timedOut = [['crapper', crap], ['dryer', dry]].filter(([, result]) => result?.error?.code === 'ETIMEDOUT').map(([tool]) => tool);
+  const findings = [];
+  if (timedOut.length) findings.push(`not checked, timed out: ${timedOut.join(', ')}`);
+  if (complex.length) findings.push(`complexity >= ${MAX_CC}: ${complex.slice(0, 5).join(', ')}${complex.length > 5 ? ', ...' : ''}`);
+  if (duplicates.length) findings.push(`duplicates >= ${MIN_SIMILARITY}: ${duplicates.slice(0, 3).join('; ')}${duplicates.length > 3 ? '; ...' : ''}`);
+  if (findings.length) console.log(`code-gates ${path.relative(repo, target)}: ${findings.join(' | ')}`.replaceAll(`${repo}/`, ''));
+  return 0;
+}
+
+// The staged tree hash identifies exactly what a commit would record.
+function stagedState(cwd) {
+  const repo = git(cwd, 'rev-parse', '--show-toplevel');
+  if (!repo) return undefined;
+  const files = codeFiles(git(cwd, 'diff', '--no-relative', '--cached', '--name-only', '-z', '--no-renames', '--diff-filter=AM'));
+  const tree = git(cwd, 'write-tree');
+  return files.length && tree ? { repo, files, tree } : undefined;
+}
+// Lists come from `-z` git output: NUL-separated, never quoted (git quotes non-ASCII names otherwise).
+const codeFiles = (list) => (list ?? '').split('\0').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
+const idOf = (repo) => crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12);
+// Keyed by repository too: the same tree gated in one repository says nothing about another.
+const markerOf = ({ repo, tree }) => path.join(CACHE, 'ran', idOf(repo), tree);
+
+function gate(args) {
+  const missing = missingTools();
+  if (missing.length) return doctor();
+  const state = stagedState(process.cwd());
+  if (!state) {
+    console.log('code-gates: no staged Python or TypeScript source files.');
+    return 0;
+  }
+  // The tools read the working tree, so it must hold exactly what is staged.
+  const partial = codeFiles(git(state.repo, '--literal-pathspecs', 'diff', '--no-relative', '--name-only', '-z', '--', ...state.files));
+  if (partial.length) {
+    console.log(`code-gates: ${partial.join(', ')} differ between the index and the working tree; stage or stash those changes, then rerun.`);
+    return 1;
+  }
+  const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+  const withOption = (name, list) => (option(name) ? [...list, name, option(name)] : list);
+  const files = state.files.map((file) => path.join(state.repo, file));
+  // Duplicates are searched across the whole repository, then reported for the staged files only.
+  const dry = run('dryer', ['--threshold', MIN_SIMILARITY, ...sourceFiles(state.repo)], { cwd: state.repo });
+  const duplicates = files.flatMap((file) => duplicatesOf(dry.stdout ?? '', file, state.repo));
+  console.log(`## dryer\n${[...new Set(duplicates)].join('\n').replaceAll(`${state.repo}/`, '') || 'no duplicates involving the staged files'}`);
+  const steps = [['crapper', [...withOption('--coverage-command', []), ...files]]];
+  if (!args.includes('--no-mutator')) steps.push(['mutator', [...withOption('--test-command', []), ...files]]);
+  const statuses = [`dryer exit ${dry.status}`, ...steps.map(([tool, toolArgs]) => {
+    console.log(`\n## ${tool}`);
+    return `${tool} exit ${run(tool, toolArgs, { cwd: state.repo, stdio: 'inherit' }).status}`;
+  })];
+  fs.mkdirSync(path.dirname(markerOf(state)), { recursive: true });
+  fs.writeFileSync(markerOf(state), `${state.repo}\n`);
+  console.log(`\ncode-gates: ran on ${state.files.length} staged file(s) (${statuses.join(', ')}${args.includes('--no-mutator') ? ', mutator skipped' : ''}).`);
+  console.log('Report these results to the user before committing; justify any exception.');
+  return 0;
+}
+
+// Runs as git's pre-commit hook, where the index (GIT_INDEX_FILE) is exactly what the commit records,
+// including `commit -a` and `commit <paths>`. Only agents' commits are gated; CODE_GATES_SKIP=1 skips.
+// git runs no pre-commit hook for rebase, cherry-pick, revert, am or merge commits; the skill covers those.
+function check() {
+  if (!AGENT_ENV.some((name) => process.env[name]) || process.env.CODE_GATES_SKIP === '1') return 0;
+  const state = stagedState(process.cwd());
+  if (!state || fs.existsSync(markerOf(state)) || missingTools().length) return 0;
+  console.error('code-gates: run `code-gates run` (crapper, dryer and mutator on the staged code) and report the results to the user, then commit the staged files with a plain `git commit` (no -a or paths).');
+  return 1;
+}
+
+// A plain read (not --global) follows include.path like git itself.
+const globalIgnore = () => git(os.homedir(), 'config', '--path', 'core.excludesFile')
+  ?? path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'git', 'ignore');
+
+// Setup steps that are still missing, each with the command that does it.
+function doctor() {
+  const missing = missingTools();
+  const lines = missing.length ? [`code-gates: missing ${missing.join(', ')}. Install with:\n  ${INSTALL.join('\n  ')}`] : [];
+  const hooks = (git(os.homedir(), 'hook', 'list', 'pre-commit') ?? '').split('\n');
+  if (!hooks.includes(HOOK) || git(os.homedir(), 'config', '--global', `hook.${HOOK}.command`) !== HOOK_COMMAND) {
+    lines.push(`code-gates: the commit gate is not set up (needs git 2.54+). Set it up with:\n  git config --global hook.${HOOK}.event pre-commit\n  git config --global hook.${HOOK}.command '${HOOK_COMMAND}'`);
+  }
+  const ignore = globalIgnore();
+  const ignored = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8').split('\n').map((line) => line.trim()) : [];
+  const unignored = TOOL_OUTPUT.filter((dir) => !ignored.includes(dir));
+  if (unignored.length) {
+    lines.push(`code-gates: git does not ignore the tools' output. Ignore it with:\n  mkdir -p '${path.dirname(ignore)}' && printf '\\n${unignored.join('\\n')}\\n' >>'${ignore}'`);
+  }
+  if (lines.length) console.log(lines.join('\n'));
+  return lines.length ? 1 : 0;
+}
+
+const [command, ...args] = process.argv.slice(2);
+const commands = {
+  quick: () => quick(args[0]),
+  run: () => gate(args),
+  check,
+  doctor,
+};
+if (!commands[command]) {
+  console.error('usage: code-gates quick <file> | run [--no-mutator] [--test-command C] [--coverage-command C] | check | doctor');
+  process.exit(2);
+}
+process.exit(commands[command]());
