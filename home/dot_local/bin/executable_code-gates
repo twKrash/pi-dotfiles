@@ -71,7 +71,7 @@ function quick(file) {
   const root = git(path.dirname(target), 'rev-parse', '--show-toplevel');
   const repo = root ?? path.dirname(target);
   // Metrics go to a scratch root so the repository is left untouched.
-  const scratch = path.join(CACHE, 'quick', crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12));
+  const scratch = path.join(CACHE, 'quick', idOf(repo));
   fs.mkdirSync(scratch, { recursive: true });
   // Both tools together stay under the hooks' 30 s timeout.
   const crap = run('crapper', ['--root', scratch, '--no-coverage', target], { timeout: 12000 });
@@ -98,7 +98,9 @@ function stagedState(cwd) {
 }
 // Lists come from `-z` git output: NUL-separated, never quoted (git quotes non-ASCII names otherwise).
 const codeFiles = (list) => (list ?? '').split('\0').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
-const markerOf = (tree) => path.join(CACHE, 'ran', tree);
+const idOf = (repo) => crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12);
+// Keyed by repository too: the same tree gated in one repository says nothing about another.
+const markerOf = ({ repo, tree }) => path.join(CACHE, 'ran', idOf(repo), tree);
 
 function gate(args) {
   const missing = missingTools();
@@ -127,8 +129,8 @@ function gate(args) {
     console.log(`\n## ${tool}`);
     return `${tool} exit ${run(tool, toolArgs, { cwd: state.repo, stdio: 'inherit' }).status}`;
   })];
-  fs.mkdirSync(path.dirname(markerOf(state.tree)), { recursive: true });
-  fs.writeFileSync(markerOf(state.tree), `${state.repo}\n`);
+  fs.mkdirSync(path.dirname(markerOf(state)), { recursive: true });
+  fs.writeFileSync(markerOf(state), `${state.repo}\n`);
   console.log(`\ncode-gates: ran on ${state.files.length} staged file(s) (${statuses.join(', ')}${args.includes('--no-mutator') ? ', mutator skipped' : ''}).`);
   console.log('Report these results to the user before committing; justify any exception.');
   return 0;
@@ -140,7 +142,7 @@ function gate(args) {
 function check() {
   if (!AGENT_ENV.some((name) => process.env[name]) || process.env.CODE_GATES_SKIP === '1') return 0;
   const state = stagedState(process.cwd());
-  if (!state || fs.existsSync(markerOf(state.tree)) || missingTools().length) return 0;
+  if (!state || fs.existsSync(markerOf(state)) || missingTools().length) return 0;
   console.error('code-gates: run `code-gates run` (crapper, dryer and mutator on the staged code) and report the results to the user, then commit the staged files with a plain `git commit` (no -a or paths).');
   return 1;
 }

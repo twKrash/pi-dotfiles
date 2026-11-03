@@ -141,6 +141,10 @@ try {
   assert.match(log(), new RegExp(`mutator --test-command pytest -q ${REPO}/app.py\\n`), 'mutator gets the staged source file and test command');
   assert.doesNotMatch(log(), /test_app\.py/, 'test files are not gated');
   assert.equal(gates(['check']).status, 0, 'the gated staged tree passes');
+  const twin = path.join(TMP, 'twin');
+  sh(`git clone -q . ${twin} && cp app.py ${twin}/ && cp -r tests ${twin}/ && git -C ${twin} add app.py tests`);
+  assert.equal(gates(['check'], { cwd: twin }).status, 1, 'a tree gated in one repository is not gated in another');
+  fs.rmSync(twin, { recursive: true });
   fs.writeFileSync(path.join(REPO, 'app.py'), 'print(2)\n');
   sh('git add app.py');
   assert.equal(gates(['check']).status, 1, 'restaged changes must be gated again');
