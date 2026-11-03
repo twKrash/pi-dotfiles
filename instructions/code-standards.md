@@ -87,6 +87,21 @@ Apply these when writing, reviewing, or refactoring production code. A repositor
 - Do not split code mechanically to satisfy line-count targets;
   split only along coherent responsibility boundaries.
 
+## TypeScript
+
+PEP 8 is Python-only. For TypeScript the formatter and linter decide layout; these rules cover what they do not.
+
+- Follow the project's formatter and linter configuration (Biome, Prettier, ESLint). Names: `UpperCamelCase` for types, classes and components; `lowerCamelCase` for values, functions and properties; `CONSTANT_CASE` for module-level constants.
+- Run `strict` mode. Never weaken `tsconfig` flags to make code compile.
+- Do not use `any`, `@ts-ignore`, `@ts-expect-error`, `as T` casts or non-null `!` assertions without a one-line reason. They silence the compiler and add no runtime check; prefer a runtime check or a type guard. Type external data as `unknown` and narrow it.
+- Validate parsed JSON, env and I/O input at the boundary with a runtime check. An `as T` cast is not validation.
+- Model states as discriminated unions, not optional-field bags. Make `switch` exhaustive, with a `never` check in `default`.
+- Prefer `readonly`, `as const` and immutable value types for durable data. Do not use `export let`; export a getter instead.
+- Use named exports, not default exports. Use ES module syntax only: no `namespace`, no `require`. Use `import type` for type-only imports.
+- Throw only `Error` or a subclass, and keep `try` blocks narrow. Never leave a promise floating: `await` it or handle its rejection. Never write an empty `catch`.
+- Keep the project's type check, lint and unused-code check green (for example `tsc --noEmit`, Biome, knip, dependency-cruiser where present). Do not add a new one.
+- Production code must not import from tests. No circular imports and no orphan modules.
+
 ## Quality Gates
 
 When [`crapper`](https://github.com/unclebob/crapper),
