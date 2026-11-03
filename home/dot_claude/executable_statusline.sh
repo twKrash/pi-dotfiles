@@ -18,6 +18,12 @@ until_reset() {
 join() { local s="" a; for a in "$@"; do [ -n "$a" ] && s+="${s:+ | }$a"; done; printf '%s' "$s"; }
 
 model=$(j '.model.display_name')
+# thinking level: from status JSON, else settings.json effortLevel
+effort=$(j '.effort.level')
+mid=$(j '.model.id')
+[ -z "$effort" ] && effort=$(jq -r --arg m "$mid" '.modelSettings[$m].effortLevel // .effortLevel // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" 2>/dev/null)
+case "$effort" in low) ec=244;; medium) ec=108;; high) ec=179;; xhigh) ec=173;; max) ec=167;; *) ec=252;; esac
+[ -n "$effort" ] && model_s="${model:-?} $(c "$ec" "$effort")" || model_s="${model:-?}"
 dir=$(j '.workspace.current_dir'); dir=${dir:-$(j '.cwd')}
 
 # --- line 1: where ---
@@ -36,7 +42,7 @@ if root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then
     && wt="wt:$(basename "$root")"
   if [ -d "$root/graphify-out" ]; then graph=$(c 108 graph); else graph=$(c 244 'graph✗'); fi
 fi
-line1=$(join "${model:-?}" "${dir/#$HOME/~}" "$gitpart" "$wt" "$graph")
+line1=$(join "$model_s" "${dir/#$HOME/~}" "$gitpart" "$wt" "$graph")
 
 # --- line 2: session ---
 in_tok=$(j '.context_window.total_input_tokens'); out_tok=$(j '.context_window.total_output_tokens')
