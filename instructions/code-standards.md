@@ -104,6 +104,20 @@ changed code before final review and report the results:
 Justify any remaining exception. These gates test the tests; they do not replace
 the behavioral tests above.
 
+If `code-gates doctor` reports a missing tool, or a tool is not on `PATH`, recommend
+that the user install it with [uv](https://docs.astral.sh/uv/) and continue without
+that gate meanwhile; do not install it yourself:
+
+```sh
+uv tool install git+https://github.com/unclebob/crapper
+uv tool install git+https://github.com/unclebob/dryer
+uv tool install git+https://github.com/unclebob/mutator --with git+https://github.com/unclebob/crapper
+```
+
+Update them with `uv tool upgrade crapper dryer mutator`. mutator runs the tests
+in the project's `.venv`, which needs `pytest` and `coverage` (for example after
+`uv sync`).
+
 Run them through `code-gates`:
 
 - After each Python or TypeScript edit, a `code-gates` line in the tool result

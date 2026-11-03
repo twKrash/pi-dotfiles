@@ -118,7 +118,7 @@ mkdir -p "$H/.config/ai-memory"
 # Existing Claude Code settings: local permissions and a local plugin survive the merge;
 # local auto-memory is turned off anyway (enforced, not a default).
 mkdir -p "$H/.claude"
-printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]},{"matcher":"Odd","hooks":"malformed"}]}}' >"$H/.claude/settings.json"
+printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]},{"matcher":"Odd","hooks":"malformed"},{"matcher":"Read","hooks":[{"type":"command","command":"node \"$HOME/.claude/hooks/code-gates-hook.mjs\" pre-commit"}]}]}}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # An existing global git ignore keeps its lines; the code-gates outputs are added once.
 mkdir -p "$H/.config/git"
@@ -296,13 +296,16 @@ const commands = live.hooks.PreToolUse.flatMap((group) => (Array.isArray(group.h
 if (!commands.includes('local-hook')) throw new Error('local hook lost');
 const guard = repo.hooks.PreToolUse[0].hooks[0].command;
 if (commands.filter((command) => command === guard).length !== 1) throw new Error('guard hook missing or duplicated');
-// Every repo hook event (code-gates adds PostToolUse and SessionStart) is installed exactly once.
+// Every repo hook (code-gates adds PostToolUse and SessionStart) is installed exactly once under its
+// own matcher, even when a local group already runs the same command under another matcher.
+const pairs = (groups) => groups.flatMap((group) => (Array.isArray(group.hooks) ? group.hooks : []).map((hook) => JSON.stringify([group.matcher ?? '', hook.command])));
 for (const [event, groups] of Object.entries(repo.hooks)) {
-  const installed = live.hooks[event].flatMap((group) => (Array.isArray(group.hooks) ? group.hooks : []).map((hook) => hook.command));
-  for (const hook of groups.flatMap((group) => group.hooks)) {
-    if (installed.filter((command) => command === hook.command).length !== 1) throw new Error(`${event} hook missing or duplicated: ${hook.command}`);
+  const installed = pairs(live.hooks[event]);
+  for (const pair of pairs(groups)) {
+    if (installed.filter((p) => p === pair).length !== 1) throw new Error(`${event} hook missing or duplicated: ${pair}`);
   }
 }
+if (!pairs(live.hooks.PreToolUse).some((pair) => pair.startsWith('["Read",'))) throw new Error('local Read group lost');
 NODE
 test "$(cat "$H/.config/git/ignore")" = "$(printf '%s\n' 'local-ignore/' '.metrics/' 'target/')"
 test -x "$H/.local/bin/code-gates"

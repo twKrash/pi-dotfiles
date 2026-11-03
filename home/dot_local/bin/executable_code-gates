@@ -27,8 +27,10 @@ const INSTALL = [
 ];
 
 const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', maxBuffer: 64 << 20, ...options });
-const git = (cwd, ...args) => {
-  const result = run('git', args, { cwd });
+// `where` is a directory, or { cwd, args, env } for the global options and environment of a command.
+const git = (where, ...args) => {
+  const { cwd, args: global = [], env = {} } = typeof where === 'string' ? { cwd: where } : where;
+  const result = run('git', [...global, ...args], { cwd, env: { ...process.env, ...env } });
   return result.status === 0 ? result.stdout.trim() : undefined;
 };
 const missingTools = () => TOOLS.filter((tool) => run('sh', ['-c', `command -v ${tool}`]).status !== 0);
@@ -75,11 +77,11 @@ function quick(file) {
 }
 
 // The staged tree hash identifies exactly what a commit would record.
-function stagedState(cwd) {
-  const repo = git(cwd, 'rev-parse', '--show-toplevel');
+function stagedState(where) {
+  const repo = git(where, 'rev-parse', '--show-toplevel');
   if (!repo) return undefined;
-  const files = codeFiles(git(repo, 'diff', '--cached', '--name-only', '--no-renames', '--diff-filter=AM'));
-  const tree = git(repo, 'write-tree');
+  const files = codeFiles(git(where, 'diff', '--cached', '--name-only', '--no-renames', '--diff-filter=AM'));
+  const tree = git(where, 'write-tree');
   return files.length && tree ? { repo, files, tree } : undefined;
 }
 const codeFiles = (list) => (list ?? '').split('\n').filter((file) => CODE_FILE.test(file) && !TEST_FILE.test(file));
@@ -113,36 +115,94 @@ function gate(args) {
   return 0;
 }
 
-function check(cwd = process.cwd()) {
-  const state = stagedState(cwd);
+function check(where = process.cwd()) {
+  const state = stagedState(where);
   if (!state || fs.existsSync(markerOf(state.tree)) || missingTools().length) return 0;
   console.log('Run `code-gates run` (crapper, dryer and mutator on the staged code) and report the results to the user before committing. Restage-and-commit after any change reruns it.');
   return 1;
 }
 
-const COMMIT = /(?:^|[\s;&|(])git((?:\s+-[cC]\s+\S+)*)\s+commit(?![-\w])/;
-const STAGING = /(?:^|[\s;&|(])git(?:\s+-[cC]\s+\S+)*\s+(?:add|rm|mv|stage)(?![-\w])/;
-const COMMIT_STAGES = /\s(?:-[A-Za-z]*[aio][A-Za-z]*|--(?:all|include|only))(?=\s|$)/;
+// Shell words: quoted strings stay whole, unquoted ; & | ( ) and newlines are separators.
+const WORD = /"(?:[^"\\]|\\.)*"|'[^']*'|[;&|()\n]+|[^\s;&|()"']+/g;
+const unquote = (word) => word.replace(/^(["'])([\s\S]*)\1$/, '$2');
+const SEPARATOR = /^[;&|()\n]+$/;
+// git global options that take the next word as their value.
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env']);
+// Short commit options that take a value, and the ones that stage files.
+const COMMIT_VALUE_LETTERS = 'mFCct';
+const COMMIT_STAGE_LETTERS = 'aiop';
+const COMMIT_VALUE_LONG = new Set(['--message', '--file', '--author', '--date', '--template', '--reuse-message', '--reedit-message', '--fixup', '--squash', '--cleanup', '--trailer', '--gpg-sign']);
+const COMMIT_STAGE_LONG = new Set(['--all', '--include', '--only', '--patch', '--interactive', '--pathspec-from-file']);
+
+// Finds `git [global options] commit [arguments]` in a command, also inside `sh -c "..."` strings.
+// Returns the git context (global options and GIT_DIR/GIT_WORK_TREE) and whether the commit stages files itself.
+// `staged` is true when an earlier part of the command already ran `git add`, `rm`, `mv` or `stage`.
+function parseCommit(command, staged = false) {
+  const words = command.match(WORD) ?? [];
+  for (let i = 0; i < words.length; i++) {
+    const word = unquote(words[i]);
+    if (/^["']/.test(words[i]) && /\bgit\b[\s\S]*\bcommit\b/.test(word)) {
+      const nested = parseCommit(word, staged);
+      if (nested) return nested;
+    }
+    if (word !== 'git' && !word.endsWith('/git')) continue;
+    const args = [];
+    let j = i + 1;
+    while (j < words.length && unquote(words[j]).startsWith('-')) {
+      const option = unquote(words[j]);
+      args.push(option);
+      if (GIT_VALUE_OPTIONS.has(option) && j + 1 < words.length) args.push(unquote(words[++j]));
+      j++;
+    }
+    const subcommand = unquote(words[j] ?? '');
+    if (['add', 'rm', 'mv', 'stage'].includes(subcommand)) staged = true;
+    if (subcommand !== 'commit') continue;
+    let stages = staged;
+    for (let k = j + 1; k < words.length && !SEPARATOR.test(words[k]); k++) {
+      const arg = unquote(words[k]);
+      if (arg === '--') { stages = k + 1 < words.length && !SEPARATOR.test(words[k + 1]); break; }
+      if (arg.startsWith('--')) {
+        const name = arg.split('=')[0];
+        if (COMMIT_STAGE_LONG.has(name)) stages = true;
+        if (COMMIT_VALUE_LONG.has(name) && !arg.includes('=')) k++;
+      } else if (arg.startsWith('-') && arg.length > 1) {
+        for (let n = 1; n < arg.length; n++) {
+          if (COMMIT_STAGE_LETTERS.includes(arg[n])) stages = true;
+          if (COMMIT_VALUE_LETTERS.includes(arg[n])) { if (n === arg.length - 1) k++; break; }
+        }
+      } else stages = true; // a pathspec: `git commit <path>` commits those files as they are on disk
+    }
+    const env = Object.fromEntries([...command.matchAll(/\b(GIT_DIR|GIT_WORK_TREE)=("[^"]*"|'[^']*'|\S+)/g)].map((m) => [m[1], unquote(m[2])]));
+    const gitArgs = args.filter((arg, n) => !(arg === '-c' || args[n - 1] === '-c'));
+    return { where: { cwd: process.cwd(), args: gitArgs, env }, explicit: gitArgs.length > 0 || Object.keys(env).length > 0, stages };
+  }
+  return undefined;
+}
 
 // Decides for an agent's shell command whether it would commit ungated code.
-// shortcut: `cd dir && git commit` and `git commit <pathspec>` are not followed; only `git -C dir` and staging flags are.
+// shortcut: `cd dir && git commit`, aliases, eval and scripts are not followed; `git -C`, `--git-dir`,
+// `--work-tree`, GIT_DIR and GIT_WORK_TREE are.
 function checkCommand(command) {
-  const commit = command.match(COMMIT);
+  const commit = parseCommit(command);
   // CODE_GATES_SKIP=1 is the user's escape hatch.
   if (!commit || /\bCODE_GATES_SKIP=1\b/.test(command) || missingTools().length) return 0;
-  const dir = commit[1].match(/-C\s+(\S+)/)?.[1];
-  const cwd = dir ? path.resolve(dir) : process.cwd();
-  const commitArgs = command.slice(commit.index + commit[0].length).split(/[;&|]/)[0];
-  if (STAGING.test(command) || COMMIT_STAGES.test(commitArgs)) {
+  const { where } = commit;
+  const repo = git(where, 'rev-parse', '--show-toplevel');
+  if (!repo) {
+    if (!commit.explicit) return 0;
+    console.log('code-gates could not resolve the repository this commit targets; commit from inside the repository without --git-dir, --work-tree or GIT_DIR.');
+    return 1;
+  }
+  // Staged-tree checks stay valid from a subdirectory: diff and write-tree work on the whole repository.
+  if (commit.stages) {
     // The command stages files itself, so the staged tree checked now is not what gets committed.
-    const repo = git(cwd, 'rev-parse', '--show-toplevel');
-    const unstaged = repo ? [...codeFiles(git(repo, 'diff', '--name-only')), ...codeFiles(git(repo, 'ls-files', '--others', '--exclude-standard'))] : [];
+    const unstaged = [...codeFiles(git(where, 'diff', '--name-only')), ...codeFiles(git(where, 'ls-files', '--others', '--exclude-standard', '--', ':/'))];
     if (unstaged.length) {
-      console.log('Stage the Python/TypeScript changes in a separate command, run `code-gates run`, report the results to the user, then commit without staging flags.');
+      console.log('Stage the Python/TypeScript changes in a separate command, run `code-gates run`, report the results to the user, then commit without staging flags or paths.');
       return 1;
     }
   }
-  return check(cwd);
+  return check(where);
 }
 
 function doctor() {

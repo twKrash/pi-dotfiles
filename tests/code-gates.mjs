@@ -116,6 +116,24 @@ try {
   assert.equal(command('git commit --all -m x'), 1, 'commit --all is blocked too');
   assert.equal(command('git commit -m x'), 0, 'a plain commit with nothing staged passes');
   assert.equal(command('CODE_GATES_SKIP=1 git commit -am x'), 0, 'the escape hatch passes');
+  for (const cmd of [
+    'git --no-pager commit -am x', 'git -c "user.name=A B" commit -am x', 'git --git-dir=.git commit -am x',
+    'git commit -p -m x', 'git commit --patch -m x', 'git commit --interactive', 'git commit -m x app.py',
+    'git commit -m x -- app.py', 'sh -c "git commit -am x"',
+  ]) assert.equal(command(cmd), 1, `commits that stage ungated code are blocked: ${cmd}`);
+  for (const cmd of ['git commit -m "docs: explain git add flow"', 'git commit -F msg.txt', 'git commit --author "A B <a@b>" -m x']) {
+    assert.equal(command(cmd), 0, `option values are not paths or staging: ${cmd}`);
+  }
+  sh('git add app.py');
+  for (const cmd of ['git --no-pager commit -m x', 'git -c "user.name=A B" commit -m x', 'sh -c "git commit -m x"']) {
+    assert.equal(command(cmd), 1, `global options and nested shells are followed: ${cmd}`);
+  }
+  const elsewhere = (cmd) => gates(['check', '--command', cmd], { cwd: TMP }).status;
+  assert.equal(elsewhere(`git --git-dir=${REPO}/.git --work-tree=${REPO} commit -m x`), 1, '--git-dir and --work-tree select the repository');
+  assert.equal(elsewhere(`GIT_DIR=${REPO}/.git GIT_WORK_TREE=${REPO} git commit -m x`), 1, 'GIT_DIR and GIT_WORK_TREE select the repository');
+  assert.equal(elsewhere('git --git-dir=/nonexistent commit -m x'), 1, 'an unresolvable explicit repository is blocked');
+  assert.equal(elsewhere('git commit -m x'), 0, 'outside a repository a plain commit passes');
+  sh('git reset -q');
   sh('git checkout -q app.py && git mv app.py moved.py && git commit -qm move');
   fs.writeFileSync(path.join(REPO, 'moved.py'), Array.from({ length: 20 }, (_, i) => `x${i} = ${i}\n`).join(''));
   sh('git commit -qam fill && git mv moved.py renamed.py && echo "y = 1" >>renamed.py && git add renamed.py');
