@@ -72,9 +72,11 @@ try {
   assert.match(setup.out, /git config --global hook\.code-gates\.event pre-commit/, 'doctor prints the hook setup');
   assert.match(setup.out, /\.metrics\/\\ntarget\/[\s\S]*\.config\/git\/ignore/, 'doctor prints the git ignore setup');
   assert.doesNotMatch(setup.out, /uv tool install/, 'installed tools are not reported');
+  fs.mkdirSync(path.dirname(IGNORE), { recursive: true });
+  fs.writeFileSync(IGNORE, '.env');
   sh(setup.out.split('\n').filter((line) => line.startsWith('  ')).join(' && '));
   assert.equal(sh('git hook list pre-commit').stdout.trim(), 'code-gates', 'the printed commands set up the hook');
-  assert.equal(fs.readFileSync(IGNORE, 'utf8'), '.metrics/\ntarget/\n', 'the printed commands set up the git ignore');
+  assert.equal(fs.readFileSync(IGNORE, 'utf8'), '.env\n.metrics/\ntarget/\n', 'the printed commands keep a last line without a newline');
   assert.equal(gates(['doctor']).status, 0, 'doctor passes once everything is set up');
   const doctor = gates(['doctor'], { PATH: BASE_PATH });
   assert.equal(doctor.status, 1, 'doctor fails when tools are missing');
@@ -83,6 +85,13 @@ try {
   sh(`git config --global core.excludesFile ${other}`);
   assert.match(gates(['doctor']).out, new RegExp(`>>'${other}'`), 'doctor checks the ignore file git actually reads');
   sh('git config --global --unset core.excludesFile');
+  fs.writeFileSync(path.join(TMP, 'included'), `[core]\n\texcludesFile = ${other}\n`);
+  sh(`git config --global include.path ${path.join(TMP, 'included')}`);
+  assert.match(gates(['doctor']).out, new RegExp(`>>'${other}'`), 'doctor follows include.path');
+  sh('git config --global --unset include.path');
+  sh('git config --global hook.code-gates.enabled false');
+  assert.match(gates(['doctor']).out, /hook\.code-gates\.event/, 'doctor reports a hook git does not run');
+  sh('git config --global --unset hook.code-gates.enabled');
 
   // quick
   const quick = gates(['quick', path.join(REPO, 'app.py')]).out;
@@ -113,6 +122,9 @@ try {
   assert.equal(gates(['check']).status, 0, 'nothing staged passes');
   sh('mkdir -p tests && echo t >tests/test_app.py && git add tests');
   assert.equal(gates(['check']).status, 0, 'staged test files alone pass');
+  sh('mkdir -p src/spec && echo "x = 1" >src/spec/loader.py && git add src');
+  assert.equal(gates(['check']).status, 1, 'code under a spec directory is gated');
+  sh('git rm -rq --cached src && rm -r src');
   sh('git add app.py');
   const blocked = gates(['check']);
   assert.equal(blocked.status, 1, 'staged code that was not gated is blocked');

@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const TOOLS = ['crapper', 'dryer', 'mutator'];
 const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
-const TEST_FILE = /(^|\/)(tests?|__tests__|specs?)\/|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|\.(test|spec)\.[cm]?tsx?$/;
+const TEST_FILE = /(^|\/)(tests?|__tests__)\/|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|\.(test|spec)\.[cm]?tsx?$/;
 const CACHE = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'code-gates');
 const AGENT_ENV = ['PI_CODING_AGENT', 'CLAUDECODE'];
 const HOOK = 'code-gates';
@@ -136,6 +136,7 @@ function gate(args) {
 
 // Runs as git's pre-commit hook, where the index (GIT_INDEX_FILE) is exactly what the commit records,
 // including `commit -a` and `commit <paths>`. Only agents' commits are gated; CODE_GATES_SKIP=1 skips.
+// git runs no pre-commit hook for rebase, cherry-pick, revert, am or merge commits; the skill covers those.
 function check() {
   if (!AGENT_ENV.some((name) => process.env[name]) || process.env.CODE_GATES_SKIP === '1') return 0;
   const state = stagedState(process.cwd());
@@ -144,21 +145,23 @@ function check() {
   return 1;
 }
 
-const globalIgnore = () => git(os.homedir(), 'config', '--global', '--path', 'core.excludesFile')
+// A plain read (not --global) follows include.path like git itself.
+const globalIgnore = () => git(os.homedir(), 'config', '--path', 'core.excludesFile')
   ?? path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'git', 'ignore');
 
 // Setup steps that are still missing, each with the command that does it.
 function doctor() {
   const missing = missingTools();
   const lines = missing.length ? [`code-gates: missing ${missing.join(', ')}. Install with:\n  ${INSTALL.join('\n  ')}`] : [];
-  if (git(os.homedir(), 'config', '--global', `hook.${HOOK}.command`) !== HOOK_COMMAND) {
+  const hooks = (git(os.homedir(), 'hook', 'list', 'pre-commit') ?? '').split('\n');
+  if (!hooks.includes(HOOK) || git(os.homedir(), 'config', '--global', `hook.${HOOK}.command`) !== HOOK_COMMAND) {
     lines.push(`code-gates: the commit gate is not set up (needs git 2.54+). Set it up with:\n  git config --global hook.${HOOK}.event pre-commit\n  git config --global hook.${HOOK}.command '${HOOK_COMMAND}'`);
   }
   const ignore = globalIgnore();
   const ignored = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8').split('\n').map((line) => line.trim()) : [];
   const unignored = TOOL_OUTPUT.filter((dir) => !ignored.includes(dir));
   if (unignored.length) {
-    lines.push(`code-gates: git does not ignore the tools' output. Ignore it with:\n  mkdir -p '${path.dirname(ignore)}' && printf '${unignored.join('\\n')}\\n' >>'${ignore}'`);
+    lines.push(`code-gates: git does not ignore the tools' output. Ignore it with:\n  mkdir -p '${path.dirname(ignore)}' && printf '\\n${unignored.join('\\n')}\\n' >>'${ignore}'`);
   }
   if (lines.length) console.log(lines.join('\n'));
   return lines.length ? 1 : 0;

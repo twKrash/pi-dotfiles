@@ -134,7 +134,10 @@ Run them through `code-gates`:
 - Before committing, stage the change and run `code-gates run` in the repository.
   git's `pre-commit` hook fails an agent's commit of code files that `code-gates run`
   has not seen in exactly that form, including `git commit -a` and
-  `git commit <paths>`; commit the staged files with a plain `git commit`. Pass `--test-command` (for example
+  `git commit <paths>`; commit the staged files with a plain `git commit`.
+  `git rebase`, `cherry-pick`, `revert`, `am` and `merge` commit without that hook:
+  after resolving conflicts, stage the files and run `code-gates run` before
+  `--continue`. Pass `--test-command` (for example
   `"uv run pytest -q -x tests/<area>"`) to limit mutator to the matching tests, and
   `--coverage-command` when the default coverage run does not work for the repository.
   Use `--no-mutator` only when you tell the user why.
