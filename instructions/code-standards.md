@@ -132,7 +132,7 @@ Run them through `code-gates`:
   lists functions with complexity 10 or above (CRAP is never below complexity)
   and duplicates of the edited file. Fix the ones in code you changed.
 - Before committing, stage the change and run `code-gates run` in the repository.
-  git's `pre-commit` hook fails an agent's commit of code files that `code-gates run`
+  git's `pre-commit` hook fails a Pi or Claude Code agent's commit of code files that `code-gates run`
   has not seen in exactly that form, including `git commit -a` and
   `git commit <paths>`; commit the staged files with a plain `git commit`.
   `git rebase`, `cherry-pick`, `revert`, `am` and `merge` commit without that hook:
