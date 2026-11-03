@@ -3,6 +3,7 @@
 // code-standards skill loaded since the last compaction (a successful Skill tool call or Read of
 // its SKILL.md, /code-standards, or Claude Code re-attaching the invoked skill after compaction).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const CODE_FILE = /\.(py|pyi|ts|tsx|mts|cts)$/;
@@ -38,7 +39,8 @@ function transcriptOf(input) {
   return path.join(path.dirname(session), path.basename(session, '.jsonl'), 'subagents', `agent-${input.agent_id}.jsonl`);
 }
 
-// The guard must never wedge every edit: unreadable input or a missing transcript fails open.
+// The guard must never wedge every edit: unreadable input, a missing skill or a missing transcript fails open.
+if (!fs.existsSync(path.join(os.homedir(), '.claude/skills/code-standards/SKILL.md'))) process.exit(0);
 let input;
 try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { process.exit(0); }
 if (!CODE_FILE.test(input.tool_input?.file_path ?? '')) process.exit(0);

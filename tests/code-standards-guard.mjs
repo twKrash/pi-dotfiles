@@ -48,6 +48,9 @@ try {
 
   // Claude hook, run as Claude Code runs it.
   const hook = path.join(ROOT, 'home/dot_claude/hooks/executable_code-standards-guard.mjs');
+  const claudeSkill = path.join(HOME, '.claude/skills/code-standards/SKILL.md');
+  fs.mkdirSync(path.dirname(claudeSkill), { recursive: true });
+  fs.writeFileSync(claudeSkill, 'rules\n');
   const transcript = path.join(TMP, 'transcript.jsonl');
   const run = (input) => spawnSync('node', [hook], { input: typeof input === 'string' ? input : JSON.stringify(input) }).status;
   const edit = (file) => ({ tool_name: 'Edit', tool_input: { file_path: file }, transcript_path: transcript });
@@ -85,6 +88,10 @@ try {
   fs.writeFileSync(subagent, loads(toolUse('Skill', { skill: 'code-standards' }), toolResult()));
   assert.equal(run(subagentEdit), 0, 'a subagent load in its own transcript passes');
   assert.equal(run({ ...subagentEdit, agent_id: 'missing' }), 0, 'a missing subagent transcript fails open');
+  fs.writeFileSync(transcript, '');
+  assert.equal(run(edit('src/app.py')), 2, 'blocked while the skill exists but is not loaded');
+  fs.rmSync(claudeSkill);
+  assert.equal(run(edit('src/app.py')), 0, 'a missing skill never wedges edits');
   console.log('code-standards guard tests passed');
 } finally {
   fs.rmSync(TMP, { recursive: true, force: true });
