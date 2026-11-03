@@ -28,6 +28,8 @@ function mergeDefaults(dst, src, prefix = '') {
     const label = prefix ? `${prefix}.${key}` : key;
     if (!(key in dst)) dst[key] = value;
     else if (value && typeof value === 'object' && !Array.isArray(value) && dst[key] && typeof dst[key] === 'object' && !Array.isArray(dst[key])) mergeDefaults(dst[key], value, label);
+    // A local list that already holds every repo entry is not a conflict.
+    else if (Array.isArray(value) && Array.isArray(dst[key]) && value.every((item) => dst[key].some((own) => isDeepStrictEqual(own, item)))) continue;
     else if (JSON.stringify(dst[key]) !== JSON.stringify(value)) {
       console.error(`pi-dotfiles: keeping local ${label}`);
     }
@@ -102,6 +104,17 @@ function tightenPermission(local, repo) {
     if (source.subagents) {
       if (next.subagents !== undefined && (!next.subagents || typeof next.subagents !== 'object' || Array.isArray(next.subagents))) throw new Error(`${targetPath}: subagents must be an object`);
       if (!next.subagents) next.subagents = {};
+      // The code-standards guard must reach subagents: repo extension and skill entries are added to
+      // existing local lists (keeping every local entry) before the defaults merge compares them.
+      const addMissing = (local, repo) => [...new Set([...local, ...repo])];
+      const repoExtensions = source.subagents.defaultSubagentOnlyExtensions;
+      if (Array.isArray(repoExtensions) && Array.isArray(next.subagents.defaultSubagentOnlyExtensions)) {
+        next.subagents.defaultSubagentOnlyExtensions = addMissing(next.subagents.defaultSubagentOnlyExtensions, repoExtensions);
+      }
+      for (const [role, values] of Object.entries(source.subagents.agentOverrides ?? {})) {
+        const local = next.subagents.agentOverrides?.[role];
+        if (Array.isArray(values.skills) && Array.isArray(local?.skills)) local.skills = addMissing(local.skills, values.skills);
+      }
       mergeDefaults(next.subagents, source.subagents, 'subagents');
     }
     const roleOverrides = profile.subagents?.agentOverrides;
@@ -134,7 +147,19 @@ function tightenPermission(local, repo) {
     // Core instructions forbid harness auto-memory, so this key is enforced, not a default.
     if ('autoMemoryEnabled' in source) next.autoMemoryEnabled = source.autoMemoryEnabled;
     // Add missing repo defaults (plugins, marketplaces, status line); local values win.
-    mergeDefaults(next, source);
+    const { hooks: repoHooks = {}, ...defaults } = source;
+    mergeDefaults(next, defaults);
+    // Repo hooks are added once, identified by command; local hooks are never changed or removed.
+    for (const [event, groups] of Object.entries(repoHooks)) {
+      if (next.hooks !== undefined && (!next.hooks || typeof next.hooks !== 'object' || Array.isArray(next.hooks))) throw new Error(`${targetPath}: hooks must be an object`);
+      next.hooks ??= {};
+      if (next.hooks[event] !== undefined && !Array.isArray(next.hooks[event])) throw new Error(`${targetPath}: hooks.${event} must be an array`);
+      next.hooks[event] ??= [];
+      const present = new Set(next.hooks[event].flatMap((group) => (group?.hooks ?? []).map((hook) => hook?.command)));
+      for (const group of groups) {
+        if (!group.hooks.some((hook) => present.has(hook.command))) next.hooks[event].push(group);
+      }
+    }
   } else if (kind === 'pi-goal') {
     // Enforce repo keys (rpc.enabled) and keep every other local setting and unknown field.
     for (const [key, value] of Object.entries(source)) {

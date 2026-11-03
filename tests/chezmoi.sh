@@ -118,7 +118,7 @@ mkdir -p "$H/.config/ai-memory"
 # Existing Claude Code settings: local permissions and a local plugin survive the merge;
 # local auto-memory is turned off anyway (enforced, not a default).
 mkdir -p "$H/.claude"
-printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true}' >"$H/.claude/settings.json"
+printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]}]}}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"piInfrastructureReadPaths":["/local/infra"],"permission":{"*":"deny","bash":{"my-local-cmd":"allow"}}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
@@ -131,7 +131,7 @@ fs.writeFileSync(process.argv[4], JSON.stringify({
 }));
 fs.writeFileSync(process.argv[2], JSON.stringify({
   packages: ['npm:custom-package', 'git:github.com/nicobailon/pi-subagents'], defaultProvider: 'keep-provider', defaultModel: 'keep-model', userSetting: 'keep',
-  subagents: {agentOverrides: {scout: {model: 'local/old', thinking: 'high', tools: ['read', 'grep']}, worker: {tools: ['read', 'edit', 'write']}}}
+  subagents: {agentOverrides: {scout: {model: 'local/old', thinking: 'high', tools: ['read', 'grep']}, worker: {tools: ['read', 'edit', 'write'], skills: ['local-skill']}}, defaultSubagentOnlyExtensions: ['/local/ext.js']}
 }));
 fs.writeFileSync(process.argv[3], JSON.stringify({mcpServers: {local: {url: 'http://localhost'}}}));
 NODE
@@ -207,7 +207,7 @@ cmp "$TMP/expected-skill.md" "$H/.pi/agent/skills/prompt-engineering/SKILL.md"
 # code-standards: one source, a skill per selected harness; instructions only point to it.
 {
   printf '%s\n' '---' 'name: code-standards' \
-    'description: Design, Python and module-size standards; load before writing, reviewing, or refactoring production code.' '---' ''
+    'description: Design, Python, testing and module-size standards. Use whenever writing, editing, reviewing, or refactoring Python or TypeScript code, including as a subagent.' '---' ''
   cat "$ROOT/instructions/code-standards.md"
 } >"$TMP/expected-code-standards.md"
 cmp "$TMP/expected-code-standards.md" "$H/.pi/agent/skills/code-standards/SKILL.md"
@@ -265,6 +265,10 @@ if (roles.scout.model !== 'claude-bridge/claude-haiku-4-5' || roles.scout.thinki
 if (roles.oracle.model !== 'claude-bridge/claude-opus-5-5' || roles.oracle.thinking !== 'high') throw new Error('Claude oracle profile missing');
 if (JSON.stringify(roles.scout.tools) !== JSON.stringify(['read', 'grep'])) throw new Error('scout tools changed');
 if (JSON.stringify(roles.worker.tools) !== JSON.stringify(['read', 'edit', 'write'])) throw new Error('worker tools changed');
+// The code-standards guard reaches subagents: its skill and extension join local lists.
+if (JSON.stringify(roles.worker.skills) !== JSON.stringify(['local-skill', 'graphify', 'ponytail', 'code-standards'])) throw new Error('worker skills not extended');
+if (!roles.reviewer.skills.includes('code-standards')) throw new Error('reviewer code-standards skill missing');
+if (JSON.stringify(s.subagents.defaultSubagentOnlyExtensions) !== JSON.stringify(['/local/ext.js', '~/.pi/agent/extensions/code-standards-guard.js'])) throw new Error('guard extension not added');
 if (!m.mcpServers.local) throw new Error('unrelated MCP server removed');
 if (!m.mcpServers.context7?.url) throw new Error('Context7 missing');
 NODE
@@ -283,7 +287,15 @@ for (const key of Object.keys(repo.enabledPlugins)) if (!(key in live.enabledPlu
 for (const key of Object.keys(repo.extraKnownMarketplaces)) if (!(key in live.extraKnownMarketplaces)) throw new Error('missing marketplace ' + key);
 if (live.statusLine.command !== repo.statusLine.command) throw new Error('statusLine missing');
 if (live.autoMemoryEnabled !== false) throw new Error('Claude auto-memory not disabled');
+// Repo hooks are added once next to local ones; local hooks are kept.
+const commands = live.hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
+if (!commands.includes('local-hook')) throw new Error('local hook lost');
+const guard = repo.hooks.PreToolUse[0].hooks[0].command;
+if (commands.filter((command) => command === guard).length !== 1) throw new Error('guard hook missing or duplicated');
 NODE
+test -x "$H/.claude/hooks/code-standards-guard.mjs"
+cmp "$ROOT/home/dot_claude/hooks/executable_code-standards-guard.mjs" "$H/.claude/hooks/code-standards-guard.mjs"
+cmp "$ROOT/home/dot_pi/private_agent/private_extensions/code-standards-guard.js" "$H/.pi/agent/extensions/code-standards-guard.js"
 # Claude MCP servers are registered once; a server the machine already has is left alone.
 grep -qx context7 "$STUB_ADDED"
 if grep -qx github "$STUB_ADDED"; then exit 1; fi

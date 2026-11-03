@@ -21,6 +21,7 @@
     "npm:pi-subagents"
   ],
   "subagents": {
+    "defaultSubagentOnlyExtensions": ["~/.pi/agent/extensions/code-standards-guard.js"],
     "agentOverrides": {
       "delegate": { "thinking": "low" },
       "scout": {
@@ -33,13 +34,13 @@
         "thinking": "medium",
         "acceptanceRole": "writer",
         "inheritSkills": false,
-        "skills": ["graphify", "ponytail"]
+        "skills": ["graphify", "ponytail", "code-standards"]
       },
       "reviewer": {
         "thinking": "high",
         "acceptanceRole": "read-only",
         "inheritSkills": false,
-        "skills": ["graphify", "ponytail-review"]
+        "skills": ["graphify", "ponytail-review", "code-standards"]
       },
       "oracle": {
         "thinking": "high",

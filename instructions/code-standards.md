@@ -26,6 +26,12 @@ Apply these when writing, reviewing, or refactoring production code. A repositor
   in multiple modules.
 - Prefer immutable value objects for durable identities, protocol facts, and
   validated domain data when mutation is not part of the contract.
+- Model data so illegal states cannot be represented. Prefer a structure or type
+  that cannot hold an invalid combination over runtime checks scattered through the code.
+- Make operations with persistence, retries, or external effects idempotent:
+  running one twice, or rerunning it after a crash midway, ends in the same state.
+- Do not share mutable state between concurrent actors that do not need it.
+  When they must, enforce a single writer in the structure, not by convention.
 - At protocol and persistence boundaries, validate inputs explicitly and
   fail closed. Do not silently normalize, infer, repair, downgrade, or
   reinterpret malformed or unsupported authoritative data unless the governing
@@ -51,11 +57,16 @@ Apply these when writing, reviewing, or refactoring production code. A repositor
   Never silently reinterpret old persisted data using newer semantics.
 - New behavior and bug fixes require focused regression tests. Tests should prove
   the changed behavior and should fail when that behavior is removed or broken.
+- Tests call the code the way its caller does and assert the results that caller
+  observes, not internal calls or structure. Discard a test that would still pass
+  if the code under test returned nothing.
 - Test negative, invalid, stale, crash/recovery, and boundary cases for code dealing
   with persistence, authority, concurrency, permissions, identities, or external
   effects.
 - Do not weaken a contract, validation rule, safety property, or test merely to
   make an implementation pass.
+- When two fixes that rest on the same premise fail the same check, stop.
+  State the premise in one sentence and verify it before attempting another fix.
 - Keep changes narrowly scoped. Do not perform unrelated cleanup, formatting, refactoring,
   dependency upgrades, or behavior changes in the same task unless they
   are required for correctness.
@@ -75,3 +86,24 @@ Apply these when writing, reviewing, or refactoring production code. A repositor
   lines require an explicit justification or decomposition before final review.
 - Do not split code mechanically to satisfy line-count targets;
   split only along coherent responsibility boundaries.
+
+## Quality Gates
+
+When [`crapper`](https://github.com/unclebob/crapper),
+[`dryer`](https://github.com/unclebob/dryer), or
+[`mutator`](https://github.com/unclebob/mutator) are available, run them on the
+changed code before final review and report the results:
+
+- `crapper`: keep each changed function's CRAP score below 10 by splitting it,
+  testing it, or both.
+- `dryer`: review duplicate pairs with similarity 0.8 or above and remove real
+  duplication.
+- `mutator`: cover uncovered mutants, kill surviving ones, and delete the dead
+  code they expose.
+
+Justify any remaining exception. These gates test the tests; they do not replace
+the behavioral tests above.
+
+The gates are a local aid, not a project dependency. Keep their output (`.metrics/`,
+`target/`) out of git through `.git/info/exclude`, never `.gitignore`, and do not
+add the tools or their configuration to tracked project files.

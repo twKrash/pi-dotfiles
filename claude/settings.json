@@ -42,5 +42,19 @@
     "type": "command",
     "command": "~/.claude/statusline.sh"
   },
-  "autoMemoryEnabled": false
+  "autoMemoryEnabled": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks/code-standards-guard.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
 }
