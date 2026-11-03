@@ -14,7 +14,7 @@ Install the Graphify skill with `graphify install --platform pi` and invoke it a
 
 Use `pi-subagents` for delegated agent work. These Pi rules apply to all configured Pi model profiles, including the Claude-backed profile. Do not use Herdr agent spawns for implementation, review, or other delegation unless the user explicitly requests Herdr or `pi-subagents` is unavailable.
 
-Delegated agents must not run `rm`. The repo's default Pi permission config marks `rm -rf *` as `ask`, and native subagent permission asks are forwarded to the parent session's UI, where an unanswered prompt stalls the child. The main process runs user-approved cleanup itself.
+Delegated agents must not run commands the Pi permission config marks `ask` (by default `rm -rf`, `sudo`, `git push`, `git reset --hard` and `git clean`): native subagent permission asks are forwarded to the parent session's UI, where an unanswered prompt stalls the child. Deleting files the task itself requires is allowed with `git rm` or a non-recursive `rm`; temporary-file cleanup is left to the main process, which runs it only after user approval.
 
 ## Worktrees
 

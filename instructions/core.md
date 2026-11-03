@@ -83,7 +83,11 @@ Do not silently substitute one delegation system for another when doing so mater
 
 The parent remains responsible for task ownership, integration, resolving conflicting findings, and final verification.
 
+Give a delegated agent a self-contained brief: objective and expected deliverable, scope and constraints, repository, `cwd` and branch when relevant, and references to canonical sources rather than copied context. The agent validates assumptions that affect correctness before acting on them.
+
 Treat delegated output as evidence and work product, not authoritative truth.
+
+Record non-obvious architectural or behavioral decisions, and why important alternatives were rejected, in the project's canonical decision mechanism (such as ADRs) when one exists.
 
 ## Investigation and reasoning
 

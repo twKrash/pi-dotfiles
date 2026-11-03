@@ -10,7 +10,7 @@ This section only specializes the instructions above for Claude Code.
 
 ## Delegation (Claude Code)
 
-Use Claude Code subagents for delegated work. A fresh subagent does not see the conversation, so give it a self-contained handoff.
+Use Claude Code subagents for delegated work. A fresh subagent does not see the conversation, so give it the self-contained brief described above.
 
 ## Skills
 
