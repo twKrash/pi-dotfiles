@@ -160,6 +160,32 @@ try {
   assert.equal(elsewhere(`git -C "${REPO}" commit -m x`), 1, 'a quoted -C value is followed');
   assert.equal(elsewhere('git commit -m x'), 0, 'outside a repository a plain commit passes');
   sh('git reset -q');
+
+  // a gated staged tree, then commands that change it within the commit command
+  sh('git checkout -q app.py');
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(4)\n');
+  sh('git add app.py');
+  gates(['run', '--no-mutator']);
+  for (const cmd of ["echo 'a=3' >app.py && git commit -am x", 'sed -i.bak s/4/5/ app.py && git add app.py && git commit -m x', 'git checkout HEAD -- app.py && git commit -m x']) {
+    assert.equal(command(cmd), 1, `earlier commands that change what is committed are blocked: ${cmd}`);
+  }
+  for (const cmd of ['git commit -m x', 'git status && git commit -am x', 'echo hi && git commit -m x']) {
+    assert.equal(command(cmd), 0, `the gated tree commits: ${cmd}`);
+  }
+  fs.writeFileSync(path.join(REPO, 'app.py'), 'print(6)\n');
+  assert.equal(command(`git commit -m "$(cat <<'EOF'\nfix: quote "a b" in docs\nEOF\n)"`), 0, 'heredoc commit messages are not paths');
+  assert.equal(command("cat > notes.md <<'EOF2'\nIt's done\nEOF2\ngit commit -am 'x'"), 1, 'quotes in heredoc bodies do not hide a later commit');
+  assert.equal(command("# don't forget\ngit commit -am x\necho 'done'"), 1, 'quotes in comments do not hide the commit');
+  assert.equal(command("git commit -am \"$(cat <<'EOF'\nIt's done\nEOF\n)\""), 1, 'quotes in heredoc bodies do not hide the commit');
+  sh('git checkout -q app.py');
+  fs.writeFileSync(path.join(REPO, 'scratch.py'), 'print(1)\n');
+  fs.appendFileSync(path.join(REPO, 'README.md'), 'more\n');
+  assert.equal(command('git commit -am docs'), 0, 'commit -a ignores untracked code it would not commit');
+  fs.unlinkSync(path.join(REPO, 'app.py'));
+  assert.equal(command('git commit -am drop'), 0, 'commit -a ignores deleted code');
+  sh('git checkout -q -- . && rm scratch.py && cp .git/index .git/alt && echo "print(7)" >app.py && GIT_INDEX_FILE=.git/alt git add app.py && git checkout -q app.py');
+  assert.equal(command('GIT_INDEX_FILE=.git/alt git commit -m x'), 1, 'GIT_INDEX_FILE selects the index that is checked');
+  sh('rm .git/alt app.py.bak 2>/dev/null; git reset -q');
   sh('git checkout -q app.py && git mv app.py moved.py && git commit -qm move');
   fs.writeFileSync(path.join(REPO, 'moved.py'), Array.from({ length: 20 }, (_, i) => `x${i} = ${i}\n`).join(''));
   sh('git commit -qam fill && git mv moved.py renamed.py && echo "y = 1" >>renamed.py && git add renamed.py');

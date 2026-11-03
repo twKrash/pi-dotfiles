@@ -129,16 +129,18 @@ function check(where = process.cwd()) {
   return 1;
 }
 
-// Shell words: runs of unquoted text, "..." and '...' parts and \-escapes; redirections and
+// Shell words: a # comment up to the end of its line, runs of unquoted text, "..." and '...' parts and \-escapes; redirections and
 // separators (; & | ( ) newline) are words of their own.
-const WORD = /\d*(?:&>>?|>>?|<<<|<<-?|<|>&|<&)&?-?\d*|(?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|[^\s;&|()<>"'\\])+|[;&|()\n]+/g;
+const WORD = /(?<=^|[\s;&|()])#[^\n]*|\d*(?:&>>?|>>?|<<<|<<-?|<|>&|<&)&?-?\d*|(?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|[^\s;&|()<>"'\\])+|[;&|()\n]+/g;
 const REDIRECT = /^\d*(?:&>>?|>>?|<<<|<<-?|<|>&|<&)&?-?\d*$/;
 const SEPARATOR = /^[;&|()\n]+$/;
 const unquote = (word) => word.replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'|\\(.)/g, (_, double, single, escaped) =>
   double !== undefined ? double.replace(/\\(.)/g, '$1') : single ?? escaped);
 const ASSIGNMENT = /^([A-Za-z_]\w*)=([\s\S]*)$/;
 const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'time', 'builtin', 'xargs', 'sudo', 'doas', 'nice', 'timeout', 'stdbuf', 'ionice']);
-const KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', '{']);
+const KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'fi', 'do', 'done', 'while', 'until', 'esac', '!', '{', '}']);
+// git subcommands that change neither the index nor the working tree; any other one before a commit may.
+const READ_ONLY = new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'ls-files', 'branch', 'remote', 'config', 'describe', 'blame', 'grep', 'fetch', 'tag', 'shortlog', 'cat-file']);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 // git global options whose value may be the next word; -C, --git-dir and --work-tree choose the repository.
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--attr-source']);
@@ -188,10 +190,10 @@ function commitStages(words) {
 // context (repository options and GIT_DIR/GIT_WORK_TREE), whether a value in it cannot be expanded, and whether
 // the commit or an earlier `git add`/`rm`/`mv`/`stage` in the command stages files itself.
 // `inherited` holds the assignments of an enclosing `sh -c` command, which the nested commands inherit.
-function parseCommits(command, state = { staged: false }, inherited = {}) {
-  // An unquoted word starting with # comments out the rest of its line.
-  const words = (command.replace(/\\\n/g, ' ').match(WORD) ?? [])
-    .filter(function (word) { this.comment = word.startsWith('#') || (this.comment && !word.includes('\n')); return !this.comment; }, {});
+// `state` tracks earlier parts of the command: `added` after git add/rm/mv/stage, `changed` after any other
+// command (it may write files), `indexChanged` after another git subcommand that may write the index.
+function parseCommits(command, state = {}, inherited = {}) {
+  const words = (withoutHeredocBodies(command).replace(/\\\n/g, ' ').match(WORD) ?? []).filter((word) => !word.startsWith('#'));
   const commits = [];
   for (let start = 0; start < words.length;) {
     let end = start;
@@ -218,7 +220,10 @@ function parseCommits(command, state = { staged: false }, inherited = {}) {
       if (flag > 0 && segment[flag + 1]) commits.push(...parseCommits(unquote(segment[flag + 1]), state, env));
       continue;
     }
-    if (name !== 'git') continue;
+    if (name !== 'git') {
+      if (name) state.changed = true;
+      continue;
+    }
     const args = [];
     let unresolved = false;
     let j = i + 1;
@@ -231,23 +236,43 @@ function parseCommits(command, state = { staged: false }, inherited = {}) {
       else args.push(...(option === '-C' ? ['-C', expanded] : [`${option}=${expanded}`]));
     }
     const gitEnv = {};
-    for (const key of ['GIT_DIR', 'GIT_WORK_TREE']) {
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) {
       if (env[key] === undefined) continue;
       const expanded = expand(env[key]);
       if (expanded === undefined) unresolved = true;
       else gitEnv[key] = expanded;
     }
     const subcommand = unquote(segment[j] ?? '');
-    if (['add', 'rm', 'mv', 'stage'].includes(subcommand)) state.staged = true;
+    if (['add', 'rm', 'mv', 'stage'].includes(subcommand)) state.added = true;
+    else if (subcommand !== 'commit' && !READ_ONLY.has(subcommand)) state.indexChanged = true;
     if (subcommand !== 'commit') continue;
+    const stages = Boolean(state.added) || commitStages(segment.slice(j + 1));
     commits.push({
       where: { cwd: process.cwd(), args, env: gitEnv },
       unresolved,
       skip: env.CODE_GATES_SKIP === '1',
-      stages: state.staged || commitStages(segment.slice(j + 1)),
+      added: Boolean(state.added),
+      stages,
+      // What this commit records cannot be checked beforehand.
+      unpredictable: Boolean(state.indexChanged) || (stages && Boolean(state.changed)),
     });
   }
   return commits;
+}
+
+const STAGE_SEPARATELY = 'Change and stage files in separate commands, run `code-gates run`, report the results to the user, then commit on its own without staging flags or paths.';
+
+// Removes heredoc bodies, whose text is input data rather than shell words.
+function withoutHeredocBodies(command) {
+  let delimiter;
+  return command.split('\n').filter((line) => {
+    if (delimiter !== undefined) {
+      if (line.replace(/^\t+/, '') === delimiter) delimiter = undefined;
+      return false;
+    }
+    delimiter = line.match(/(?<!<)<<(?!<)-?\s*(["']?)(\w+)\1/)?.[2];
+    return true;
+  }).join('\n');
 }
 
 // Decides for an agent's shell command whether one of its commits would record ungated code.
@@ -262,11 +287,19 @@ function checkCommand(command) {
     const { where } = commit;
     // Outside a repository the commit fails on its own.
     if (!git(where, 'rev-parse', '--show-toplevel')) continue;
+    if (commit.unpredictable) {
+      console.log(STAGE_SEPARATELY);
+      return 1;
+    }
     if (commit.stages) {
       // The command stages files itself, so the staged tree checked now is not what gets committed.
-      const unstaged = [...codeFiles(git(where, 'diff', '--name-only', '-z')), ...codeFiles(git(where, 'ls-files', '-z', '--others', '--exclude-standard', '--', ':/'))];
+      // Deleted files add no code; untracked ones are committed only after a git add in the command.
+      const unstaged = [
+        ...codeFiles(git(where, 'diff', '--name-only', '-z', '--diff-filter=AM')),
+        ...(commit.added ? codeFiles(git(where, 'ls-files', '-z', '--others', '--exclude-standard', '--', ':/')) : []),
+      ];
       if (unstaged.length) {
-        console.log('Stage the Python/TypeScript changes in a separate command, run `code-gates run`, report the results to the user, then commit without staging flags or paths.');
+        console.log(STAGE_SEPARATELY);
         return 1;
       }
     }
