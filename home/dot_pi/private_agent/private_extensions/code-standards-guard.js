@@ -13,12 +13,15 @@ const textOf = (content) =>
 
 // Context entries already honor compaction, so a load the summary dropped no longer counts.
 function skillInContext(sessionManager) {
+  // A read counts only once its tool result arrives without an error.
+  const pending = new Set();
   for (const entry of sessionManager.buildContextEntries()) {
     const message = entry.type === "message" ? entry.message : undefined;
     if (message?.role === "user" && textOf(message.content).startsWith('<skill name="code-standards"')) return true;
+    if (message?.role === "toolResult" && pending.has(message.toolCallId) && !message.isError) return true;
     if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
     for (const block of message.content) {
-      if (block.type === "toolCall" && block.name === "read" && SKILL_FILE.test(block.arguments?.path ?? "")) return true;
+      if (block.type === "toolCall" && block.name === "read" && SKILL_FILE.test(block.arguments?.path ?? "")) pending.add(block.id);
     }
   }
   return false;

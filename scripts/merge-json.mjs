@@ -155,7 +155,8 @@ function tightenPermission(local, repo) {
       next.hooks ??= {};
       if (next.hooks[event] !== undefined && !Array.isArray(next.hooks[event])) throw new Error(`${targetPath}: hooks.${event} must be an array`);
       next.hooks[event] ??= [];
-      const present = new Set(next.hooks[event].flatMap((group) => (group?.hooks ?? []).map((hook) => hook?.command)));
+      // Malformed local groups are left as they are; they just hold no commands to match.
+      const present = new Set(next.hooks[event].flatMap((group) => (Array.isArray(group?.hooks) ? group.hooks : []).map((hook) => hook?.command)));
       for (const group of groups) {
         if (!group.hooks.some((hook) => present.has(hook.command))) next.hooks[event].push(group);
       }

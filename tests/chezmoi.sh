@@ -118,7 +118,7 @@ mkdir -p "$H/.config/ai-memory"
 # Existing Claude Code settings: local permissions and a local plugin survive the merge;
 # local auto-memory is turned off anyway (enforced, not a default).
 mkdir -p "$H/.claude"
-printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]}]}}' >"$H/.claude/settings.json"
+printf '%s\n' '{"permissions":{"allow":["Read(/x)"]},"enabledPlugins":{"local@mine":true,"caveman@caveman":false},"autoMemoryEnabled":true,"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"local-hook"}]},{"matcher":"Odd","hooks":"malformed"}]}}' >"$H/.claude/settings.json"
 : >"$H/.config/ai-memory/MEMORY.md"
 # Pre-existing files chezmoi never wrote: a stricter local permission policy and a symlinked AGENTS.md.
 printf '%s\n' '{"piInfrastructureReadPaths":["/local/infra"],"permission":{"*":"deny","bash":{"my-local-cmd":"allow"}}}' >"$H/.pi/agent/extensions/pi-permission-system/config.json"
@@ -287,8 +287,9 @@ for (const key of Object.keys(repo.enabledPlugins)) if (!(key in live.enabledPlu
 for (const key of Object.keys(repo.extraKnownMarketplaces)) if (!(key in live.extraKnownMarketplaces)) throw new Error('missing marketplace ' + key);
 if (live.statusLine.command !== repo.statusLine.command) throw new Error('statusLine missing');
 if (live.autoMemoryEnabled !== false) throw new Error('Claude auto-memory not disabled');
-// Repo hooks are added once next to local ones; local hooks are kept.
-const commands = live.hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
+// Repo hooks are added once next to local ones; local hooks, even malformed ones, are kept.
+if (!live.hooks.PreToolUse.some((group) => group.hooks === 'malformed')) throw new Error('malformed local hook group lost');
+const commands = live.hooks.PreToolUse.flatMap((group) => (Array.isArray(group.hooks) ? group.hooks : []).map((hook) => hook.command));
 if (!commands.includes('local-hook')) throw new Error('local hook lost');
 const guard = repo.hooks.PreToolUse[0].hooks[0].command;
 if (commands.filter((command) => command === guard).length !== 1) throw new Error('guard hook missing or duplicated');

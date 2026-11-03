@@ -24,7 +24,8 @@ try {
   const ctx = { sessionManager: { buildContextEntries: () => context } };
   const call = (toolName, input) => handlers.tool_call({ toolName, input }, ctx);
   const message = (role, content) => ({ type: 'message', message: { role, content } });
-  const readSkill = message('assistant', [{ type: 'toolCall', name: 'read', arguments: { path: SKILL } }]);
+  const readSkill = message('assistant', [{ type: 'toolCall', id: 'r1', name: 'read', arguments: { path: SKILL } }]);
+  const readResult = (isError) => ({ type: 'message', message: { role: 'toolResult', toolCallId: 'r1', toolName: 'read', content: [], isError } });
   assert.equal(call('write', { path: 'notes.md' }), undefined, 'non-code files pass');
   assert.equal(call('bash', { command: 'ls' }), undefined, 'other tools pass');
   assert.equal(call('edit', { path: 'src/app.py' })?.block, true, 'Python edit blocked before the skill is read');
@@ -32,6 +33,10 @@ try {
   context = [message('user', 'mentions code-standards/SKILL.md'), message('assistant', [{ type: 'toolCall', name: 'read', arguments: { path: 'other/SKILL.md' } }])];
   assert.equal(call('edit', { path: 'src/app.py' })?.block, true, 'mentions and other skills do not count');
   context = [readSkill];
+  assert.equal(call('edit', { path: 'src/app.py' })?.block, true, 'a read still in flight does not count');
+  context = [readSkill, readResult(true)];
+  assert.equal(call('edit', { path: 'src/app.py' })?.block, true, 'a failed read does not count');
+  context = [readSkill, readResult(false)];
   assert.equal(call('edit', { path: 'src/app.py' }), undefined, 'edits pass while the read skill is in context');
   context = [{ type: 'compaction', summary: 'earlier work' }];
   assert.equal(call('edit', { path: 'src/app.ts' })?.block, true, 'compaction that dropped the read requires it again');
@@ -46,14 +51,22 @@ try {
   const transcript = path.join(TMP, 'transcript.jsonl');
   const run = (input) => spawnSync('node', [hook], { input: typeof input === 'string' ? input : JSON.stringify(input) }).status;
   const edit = (file) => ({ tool_name: 'Edit', tool_input: { file_path: file }, transcript_path: transcript });
-  const toolUse = (name, input) => JSON.stringify({ message: { content: [{ type: 'tool_use', name, input }] } });
+  const toolUse = (name, input, id = 't1') => JSON.stringify({ message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const toolResult = (isError = false, id = 't1') => JSON.stringify({ message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError }] } });
+  const loads = (...lines) => `${lines.join('\n')}\n`;
   fs.writeFileSync(transcript, `${JSON.stringify({ message: { content: 'mentions code-standards/SKILL.md in prose' } })}\n`);
   assert.equal(run(edit('README.md')), 0, 'non-code files pass');
   assert.equal(run(edit('src/app.py')), 2, 'Python edit blocked before the skill is loaded');
   assert.equal(run('not json'), 0, 'unreadable input fails open');
+  assert.equal(run({ ...edit('src/app.py'), transcript_path: '' }), 0, 'no transcript fails open');
+  assert.equal(run({ ...edit('src/app.py'), transcript_path: path.join(TMP, 'gone.jsonl') }), 0, 'a missing transcript fails open');
   fs.appendFileSync(transcript, `${toolUse('Skill', { skill: 'code-standards' })}\n`);
+  assert.equal(run(edit('src/app.py')), 2, 'a Skill call without its result does not count');
+  fs.appendFileSync(transcript, `${toolResult(true)}\n`);
+  assert.equal(run(edit('src/app.py')), 2, 'a failed Skill call does not count');
+  fs.writeFileSync(transcript, loads(toolUse('Skill', { skill: 'code-standards' }), toolResult()));
   assert.equal(run(edit('src/app.py')), 0, 'Skill tool load passes');
-  fs.writeFileSync(transcript, `${toolUse('Read', { file_path: '/h/.claude/skills/code-standards/SKILL.md' })}\n`);
+  fs.writeFileSync(transcript, loads(toolUse('Read', { file_path: '/h/.claude/skills/code-standards/SKILL.md' }), toolResult()));
   assert.equal(run(edit('src/app.ts')), 0, 'reading SKILL.md passes');
   const boundary = JSON.stringify({ type: 'system', subtype: 'compact_boundary' });
   fs.appendFileSync(transcript, `${boundary}\n`);
@@ -62,10 +75,16 @@ try {
   assert.equal(run(edit('src/app.ts')), 0, 'a skill Claude Code re-attaches after compaction counts');
   fs.writeFileSync(transcript, `${JSON.stringify({ message: { content: '<command-name>/code-standards</command-name>' } })}\n`);
   assert.equal(run(edit('src/app.ts')), 0, '/code-standards passes');
-  const subagent = path.join(TMP, 'agent.jsonl');
-  fs.writeFileSync(subagent, `${toolUse('Skill', { skill: 'code-standards' })}\n`);
+  // Subagent calls carry agent_id; their transcript is <session>/subagents/agent-<id>.jsonl.
+  const subagent = path.join(TMP, 'transcript', 'subagents', 'agent-abc.jsonl');
+  fs.mkdirSync(path.dirname(subagent), { recursive: true });
+  fs.writeFileSync(subagent, '');
+  const subagentEdit = { ...edit('src/app.py'), agent_id: 'abc' };
+  assert.equal(run(subagentEdit), 2, 'a subagent must load the skill itself, even when the session has');
   fs.writeFileSync(transcript, '');
-  assert.equal(run({ ...edit('src/app.py'), agent_transcript_path: subagent }), 0, 'subagent transcript is checked');
+  fs.writeFileSync(subagent, loads(toolUse('Skill', { skill: 'code-standards' }), toolResult()));
+  assert.equal(run(subagentEdit), 0, 'a subagent load in its own transcript passes');
+  assert.equal(run({ ...subagentEdit, agent_id: 'missing' }), 0, 'a missing subagent transcript fails open');
   console.log('code-standards guard tests passed');
 } finally {
   fs.rmSync(TMP, { recursive: true, force: true });
