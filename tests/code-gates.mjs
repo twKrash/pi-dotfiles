@@ -138,7 +138,7 @@ try {
   const ran = gates(['run', '--test-command', 'pytest -q']);
   assert.equal(ran.status, 0, 'run succeeds');
   assert.match(ran.out, /app\.py:1-4 ~ other\.py:5-8/, 'run reports duplicates of the staged files');
-  assert.match(log(), new RegExp(`mutator --test-command pytest -q ${REPO}/app.py\\n`), 'mutator gets the staged source file and test command');
+  assert.match(log(), new RegExp(`mutator --test-command pytest -q --lines 1 ${REPO}/app.py\\n`), 'mutator gets the staged source file, its changed lines and the test command');
   assert.doesNotMatch(log(), /test_app\.py/, 'test files are not gated');
   assert.equal(gates(['check']).status, 0, 'the gated staged tree passes');
   const twin = path.join(TMP, 'twin');
@@ -160,6 +160,34 @@ try {
   sh('git add café.py');
   assert.equal(gates(['check']).status, 1, 'non-ASCII file names are gated');
   sh('git rm -q --cached café.py && rm café.py');
+
+  // mutator runs on staged changed lines only, and skips accepted lines while their text is unchanged
+  fs.writeFileSync(path.join(REPO, 'lines.py'), 'a = 1\nb = 2\nc = 3\n');
+  sh('git add lines.py && git commit -qm lines', HUMAN);
+  fs.writeFileSync(path.join(REPO, 'lines.py'), 'a = 1\nb = 20\nc = 3\n');
+  fs.writeFileSync(path.join(REPO, 'more.py'), 'd = 4\n');
+  sh('git add lines.py more.py');
+  fs.writeFileSync(LOG, '');
+  gates(['run']);
+  assert.match(log(), new RegExp(`^mutator --lines 2 ${REPO}/lines.py$`, 'm'), 'only the changed line is mutated');
+  assert.match(log(), new RegExp(`^mutator --reuse-coverage --lines 1 ${REPO}/more.py$`, 'm'), 'a new file mutates every line and later files reuse coverage');
+  fs.writeFileSync(LOG, '');
+  gates(['run', '--mutate-all']);
+  assert.match(log(), new RegExp(`^mutator --mutate-all --lines 1,2,3 ${REPO}/lines.py$`, 'm'), '--mutate-all mutates every line');
+  assert.equal(gates(['accept', 'lines.py:2', 'equivalent', 'same', 'as', 'before']).status, 0, 'accept records a line');
+  assert.match(fs.readFileSync(path.join(REPO, '.metrics/mutator-accepted'), 'utf8'), /^lines\.py:2\tequivalent\t[0-9a-f]{12}\tsame as before$/m, 'the entry names the line, status, text hash and note');
+  fs.writeFileSync(LOG, '');
+  const acceptedRun = gates(['run']).out;
+  assert.doesNotMatch(log(), /^mutator .*lines\.py$/m, 'an accepted line is not rerun');
+  assert.match(acceptedRun, /lines\.py: 0 line\(s\), 1 accepted skipped/, 'skipped accepted lines are reported');
+  fs.writeFileSync(path.join(REPO, 'lines.py'), 'a = 1\nb = 21\nc = 3\n');
+  sh('git add lines.py');
+  fs.writeFileSync(LOG, '');
+  gates(['run']);
+  assert.match(log(), new RegExp(`^mutator --lines 2 ${REPO}/lines.py$`, 'm'), 'an accepted line whose text changed runs again');
+  assert.equal(gates(['accept', 'lines.py:99', 'equivalent']).status, 1, 'accept refuses a line the file does not have');
+  assert.equal(gates(['accept', 'lines.py:2', 'maybe']).status, 2, 'accept refuses an unknown status');
+  sh('git reset -q && git checkout -q lines.py && rm -rf more.py .metrics');
 
   // git's pre-commit hook (set up by doctor's commands above) sees exactly what each commit records
   fs.writeFileSync(path.join(REPO, 'app.py'), 'print(3)\n');
