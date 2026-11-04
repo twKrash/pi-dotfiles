@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 // Runs the code-standards quality gates (crapper, dryer, mutator) for agents.
 //   code-gates quick <file>   complexity and duplicates of one file; prints findings, nothing when clean
-//   code-gates run [--no-mutator] [--test-command C] [--coverage-command C]
-//                             full gates on the staged Python/TypeScript files; marks the staged tree as gated
+//   code-gates run [--no-mutator] [--mutate-all] [--test-command C] [--coverage-command C]
+//                             full gates on the staged Python/TypeScript files; marks the staged tree as gated.
+//                             mutator runs only on the staged changed lines; --mutate-all runs every line.
+//                             Either way, lines listed in .metrics/mutator-accepted are skipped.
+//   code-gates accept <file>:<line> <needs-test|equivalent> [note]
+//                             record a surviving mutant's line so mutator stops rerunning it while the
+//                             line's text is unchanged
 //   code-gates check          git pre-commit hook: exit 1 with a message when an agent commits staged code
 //                             files that have not been gated
 //   code-gates doctor         exit 1 with the setup commands for missing tools, the hook and the git ignore
@@ -24,6 +29,9 @@ const HOOK_COMMAND = '! command -v code-gates >/dev/null || code-gates check';
 // Where crapper and mutator write their output.
 const TOOL_OUTPUT = ['.metrics/', 'target/'];
 const MAX_CC = 10;
+// Survivors the user chose to stop rerunning, per repository, under the ignored tool output.
+const ACCEPTED = '.metrics/mutator-accepted';
+const ACCEPT_STATUSES = ['needs-test', 'equivalent'];
 const MIN_SIMILARITY = '0.8';
 const INSTALL = [
   'uv tool install git+https://github.com/unclebob/crapper',
@@ -102,6 +110,77 @@ const idOf = (repo) => crypto.createHash('sha1').update(repo).digest('hex').slic
 // Keyed by repository too: the same tree gated in one repository says nothing about another.
 const markerOf = ({ repo, tree }) => path.join(CACHE, 'ran', idOf(repo), tree);
 
+// Line numbers of a staged file that differ from HEAD; every line of a new file.
+function changedLines(repo, file) {
+  const diff = git(repo, '--literal-pathspecs', 'diff', '--no-relative', '--cached', '--no-renames', '-U0', '--', file) ?? '';
+  const lines = new Set();
+  for (const [, start, count] of diff.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {
+    for (let line = Number(start); line < Number(start) + Number(count ?? 1); line += 1) lines.add(line);
+  }
+  return lines;
+}
+
+// An accepted line stays accepted only while its text is unchanged: an edit or a move reruns it.
+const lineHash = (text) => crypto.createHash('sha1').update((text ?? '').trim()).digest('hex').slice(0, 12);
+
+// Entries: `<repo-relative path>:<line>\t<status>\t<line hash>\t<note>`; `#` starts a comment.
+function acceptedLines(repo) {
+  const file = path.join(repo, ACCEPTED);
+  if (!fs.existsSync(file)) return new Set();
+  return new Set(fs.readFileSync(file, 'utf8').split('\n')
+    .filter((line) => line.trim() && !line.startsWith('#'))
+    .map((line) => line.split('\t'))
+    .filter(([where, status, hash]) => where && ACCEPT_STATUSES.includes(status) && hash)
+    .map(([where, , hash]) => `${where}\t${hash}`));
+}
+
+function accept([where, status, ...note]) {
+  const [, file, number] = (where ?? '').match(/^(.+):(\d+)$/) ?? [];
+  if (!file || !ACCEPT_STATUSES.includes(status)) {
+    console.error(`usage: code-gates accept <file>:<line> <${ACCEPT_STATUSES.join('|')}> [note]`);
+    return 2;
+  }
+  const target = path.resolve(file);
+  const repo = fs.existsSync(target) && git(path.dirname(target), 'rev-parse', '--show-toplevel');
+  const text = repo && fs.readFileSync(target, 'utf8').split('\n')[Number(number) - 1];
+  if (!repo || text === undefined) {
+    console.error(`code-gates: ${where} is not a line of a file in a git repository.`);
+    return 1;
+  }
+  const entry = [`${path.relative(repo, fs.realpathSync(target))}:${number}`, status, lineHash(text), note.join(' ')].join('\t');
+  fs.mkdirSync(path.dirname(path.join(repo, ACCEPTED)), { recursive: true });
+  fs.appendFileSync(path.join(repo, ACCEPTED), `${entry}\n`);
+  console.log(`code-gates: accepted ${entry.split('\t').slice(0, 2).join(' ')}: ${text.trim()}`);
+  return 0;
+}
+
+// mutator once per file, on that file's selected lines; coverage is computed once and then reused.
+function mutate(repo, files, args, withOption) {
+  const accepted = acceptedLines(repo);
+  const all = args.includes('--mutate-all');
+  let ran = false;
+  let status = 0;
+  const summary = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(repo, file), 'utf8').split('\n');
+    // A final newline ends the last line; it does not start another.
+    if (text.at(-1) === '') text.pop();
+    const candidates = all ? text.map((_, i) => i + 1) : [...changedLines(repo, file)];
+    const lines = candidates.filter((line) => !accepted.has(`${file}:${line}\t${lineHash(text[line - 1])}`));
+    const skipped = candidates.length - lines.length;
+    summary.push(`${file}: ${lines.length} line(s)${skipped ? `, ${skipped} accepted skipped` : ''}`);
+    if (!lines.length) continue;
+    const toolArgs = [...withOption('--test-command', []), ...(all ? ['--mutate-all'] : []), ...(ran ? ['--reuse-coverage'] : []),
+      '--lines', lines.sort((a, b) => a - b).join(','), path.join(repo, file)];
+    const result = run('mutator', toolArgs, { cwd: repo, stdio: 'inherit' }).status;
+    ran = true;
+    // Report the worst outcome: 2 (baseline failed) or 1 (usage) outrank 3 (survivors).
+    if (result !== 0 && (status === 0 || status === 3)) status = result;
+  }
+  console.log(`mutator lines: ${summary.join('; ')}`);
+  return `mutator exit ${ran ? status : 'skipped (no lines to mutate)'}`;
+}
+
 function gate(args) {
   const missing = missingTools();
   if (missing.length) return doctor();
@@ -123,12 +202,13 @@ function gate(args) {
   const dry = run('dryer', ['--threshold', MIN_SIMILARITY, ...sourceFiles(state.repo)], { cwd: state.repo });
   const duplicates = files.flatMap((file) => duplicatesOf(dry.stdout ?? '', file, state.repo));
   console.log(`## dryer\n${[...new Set(duplicates)].join('\n').replaceAll(`${state.repo}/`, '') || 'no duplicates involving the staged files'}`);
-  const steps = [['crapper', [...withOption('--coverage-command', []), ...files]]];
-  if (!args.includes('--no-mutator')) steps.push(['mutator', [...withOption('--test-command', []), ...files]]);
-  const statuses = [`dryer exit ${dry.status}`, ...steps.map(([tool, toolArgs]) => {
-    console.log(`\n## ${tool}`);
-    return `${tool} exit ${run(tool, toolArgs, { cwd: state.repo, stdio: 'inherit' }).status}`;
-  })];
+  console.log('\n## crapper');
+  const crap = run('crapper', [...withOption('--coverage-command', []), ...files], { cwd: state.repo, stdio: 'inherit' });
+  const statuses = [`dryer exit ${dry.status}`, `crapper exit ${crap.status}`];
+  if (!args.includes('--no-mutator')) {
+    console.log('\n## mutator');
+    statuses.push(mutate(state.repo, state.files, args, withOption));
+  }
   fs.mkdirSync(path.dirname(markerOf(state)), { recursive: true });
   fs.writeFileSync(markerOf(state), `${state.repo}\n`);
   console.log(`\ncode-gates: ran on ${state.files.length} staged file(s) (${statuses.join(', ')}${args.includes('--no-mutator') ? ', mutator skipped' : ''}).`);
@@ -173,11 +253,12 @@ const [command, ...args] = process.argv.slice(2);
 const commands = {
   quick: () => quick(args[0]),
   run: () => gate(args),
+  accept: () => accept(args),
   check,
   doctor,
 };
 if (!commands[command]) {
-  console.error('usage: code-gates quick <file> | run [--no-mutator] [--test-command C] [--coverage-command C] | check | doctor');
+  console.error('usage: code-gates quick <file> | run [--no-mutator] [--mutate-all] [--test-command C] [--coverage-command C] | accept <file>:<line> <needs-test|equivalent> [note] | check | doctor');
   process.exit(2);
 }
 process.exit(commands[command]());
