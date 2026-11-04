@@ -174,8 +174,19 @@ try {
   fs.writeFileSync(LOG, '');
   gates(['run', '--mutate-all']);
   assert.match(log(), new RegExp(`^mutator --mutate-all --lines 1,2,3 ${REPO}/lines.py$`, 'm'), '--mutate-all mutates every line');
-  assert.equal(gates(['accept', 'lines.py:2', 'equivalent', 'same', 'as', 'before']).status, 0, 'accept records a line');
-  assert.match(fs.readFileSync(path.join(REPO, '.metrics/mutator-accepted'), 'utf8'), /^lines\.py:2\tequivalent\t[0-9a-f]{12}\tsame as before$/m, 'the entry names the line, status, text hash and note');
+  // A committed symlink in the working tree must not redirect the write or pre-accept lines.
+  const victim = path.join(TMP, 'victim');
+  fs.writeFileSync(victim, 'keep\n');
+  fs.mkdirSync(path.join(REPO, '.metrics'), { recursive: true });
+  fs.symlinkSync(victim, path.join(REPO, '.metrics/mutator-accepted'));
+  assert.equal(gates(['accept', 'lines.py:2', 'equivalent', 'same\tas', 'before\nlines.py:3\tequivalent']).status, 0, 'accept records a line');
+  assert.equal(fs.readFileSync(victim, 'utf8'), 'keep\n', 'a symlink in the working tree is never written through');
+  const acceptedDir = path.join(TMP, 'cache/code-gates/accepted');
+  const lists = fs.readdirSync(acceptedDir);
+  assert.equal(lists.length, 1, 'the list lives in the cache');
+  const listText = fs.readFileSync(path.join(acceptedDir, lists[0]), 'utf8');
+  assert.match(listText, /^lines\.py:2\tequivalent\t[0-9a-f]{12}\tsame as before lines\.py:3 equivalent$/m, 'the entry names the line, status and hash; tabs and newlines in the note become spaces');
+  assert.equal(listText.split('\n').filter(Boolean).length, 1, 'a note cannot add a second entry');
   fs.writeFileSync(LOG, '');
   const acceptedRun = gates(['run']).out;
   assert.doesNotMatch(log(), /^mutator .*lines\.py$/m, 'an accepted line is not rerun');
@@ -188,6 +199,7 @@ try {
   assert.equal(gates(['accept', 'lines.py:99', 'equivalent']).status, 1, 'accept refuses a line the file does not have');
   assert.equal(gates(['accept', 'lines.py:2', 'maybe']).status, 2, 'accept refuses an unknown status');
   sh('git reset -q && git checkout -q lines.py && rm -rf more.py .metrics');
+  fs.rmSync(acceptedDir, { recursive: true });
 
   // git's pre-commit hook (set up by doctor's commands above) sees exactly what each commit records
   fs.writeFileSync(path.join(REPO, 'app.py'), 'print(3)\n');

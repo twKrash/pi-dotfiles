@@ -159,8 +159,9 @@ Run them through `code-gates`:
   runs every line of the staged files. Use `--no-mutator` only when you tell the user why.
 - A surviving mutant the user agrees to defer (`needs-test`) or that no test can
   kill (`equivalent`) is recorded with
-  `code-gates accept <file>:<line> <needs-test|equivalent> [note]` in
-  `.metrics/mutator-accepted`. Later runs skip that line until its text changes.
+  `code-gates accept <file>:<line> <needs-test|equivalent> [note]`, kept per
+  repository under `~/.cache/code-gates/accepted/`. Later runs skip that line until
+  its text changes.
   Record one only with the user's agreement, and report deferred ones as open work.
 - Report the results to the user before committing. Only the user may skip the
   gate (`CODE_GATES_SKIP=1 git commit ...`); never use `--no-verify` to get past it.

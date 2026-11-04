@@ -4,7 +4,7 @@
 //   code-gates run [--no-mutator] [--mutate-all] [--test-command C] [--coverage-command C]
 //                             full gates on the staged Python/TypeScript files; marks the staged tree as gated.
 //                             mutator runs only on the staged changed lines; --mutate-all runs every line.
-//                             Either way, lines listed in .metrics/mutator-accepted are skipped.
+//                             Either way, accepted lines (see accept) are skipped.
 //   code-gates accept <file>:<line> <needs-test|equivalent> [note]
 //                             record a surviving mutant's line so mutator stops rerunning it while the
 //                             line's text is unchanged
@@ -29,8 +29,6 @@ const HOOK_COMMAND = '! command -v code-gates >/dev/null || code-gates check';
 // Where crapper and mutator write their output.
 const TOOL_OUTPUT = ['.metrics/', 'target/'];
 const MAX_CC = 10;
-// Survivors the user chose to stop rerunning, per repository, under the ignored tool output.
-const ACCEPTED = '.metrics/mutator-accepted';
 const ACCEPT_STATUSES = ['needs-test', 'equivalent'];
 const MIN_SIMILARITY = '0.8';
 const INSTALL = [
@@ -123,9 +121,17 @@ function changedLines(repo, file) {
 // An accepted line stays accepted only while its text is unchanged: an edit or a move reruns it.
 const lineHash = (text) => crypto.createHash('sha1').update((text ?? '').trim()).digest('hex').slice(0, 12);
 
+// Survivors the user chose to stop rerunning. The list lives in the cache, never in the working
+// tree, so repository content cannot redirect the write (a committed symlink) or pre-accept lines.
+// Keyed by the shared git directory, so every worktree of a repository reads one list.
+const acceptedFile = (repo) => {
+  const common = path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir') ?? '.git');
+  return path.join(CACHE, 'accepted', idOf(fs.existsSync(common) ? fs.realpathSync(common) : common));
+};
+
 // Entries: `<repo-relative path>:<line>\t<status>\t<line hash>\t<note>`; `#` starts a comment.
 function acceptedLines(repo) {
-  const file = path.join(repo, ACCEPTED);
+  const file = acceptedFile(repo);
   if (!fs.existsSync(file)) return new Set();
   return new Set(fs.readFileSync(file, 'utf8').split('\n')
     .filter((line) => line.trim() && !line.startsWith('#'))
@@ -135,7 +141,8 @@ function acceptedLines(repo) {
 }
 
 function accept([where, status, ...note]) {
-  const [, file, number] = (where ?? '').match(/^(.+):(\d+)$/) ?? [];
+  // Tabs and newlines separate entries, so a path holding one is refused.
+  const [, file, number] = (where ?? '').match(/^([^\t\r\n]+):(\d+)$/) ?? [];
   if (!file || !ACCEPT_STATUSES.includes(status)) {
     console.error(`usage: code-gates accept <file>:<line> <${ACCEPT_STATUSES.join('|')}> [note]`);
     return 2;
@@ -147,9 +154,15 @@ function accept([where, status, ...note]) {
     console.error(`code-gates: ${where} is not a line of a file in a git repository.`);
     return 1;
   }
-  const entry = [`${path.relative(repo, fs.realpathSync(target))}:${number}`, status, lineHash(text), note.join(' ')].join('\t');
-  fs.mkdirSync(path.dirname(path.join(repo, ACCEPTED)), { recursive: true });
-  fs.appendFileSync(path.join(repo, ACCEPTED), `${entry}\n`);
+  const relative = path.relative(repo, fs.realpathSync(target));
+  if (/[\t\r\n]/.test(relative)) {
+    console.error(`code-gates: ${where} has a tab or newline in its path.`);
+    return 1;
+  }
+  const entry = [`${relative}:${number}`, status, lineHash(text), note.join(' ').replace(/[\t\r\n]+/g, ' ')].join('\t');
+  const list = acceptedFile(repo);
+  fs.mkdirSync(path.dirname(list), { recursive: true });
+  fs.appendFileSync(list, `${entry}\n`);
   console.log(`code-gates: accepted ${entry.split('\t').slice(0, 2).join(' ')}: ${text.trim()}`);
   return 0;
 }
