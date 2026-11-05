@@ -49,7 +49,9 @@
       "~/.agents/*": "allow",
       "~/.codex/plugins/*": "allow",
       "~/.pi/agent/AGENTS.md": "allow",
-      "~/.config/ai-memory/*": "allow"
+      "~/.config/ai-memory/*": "allow",
+      "~/.context-mode": "allow",
+      "~/.context-mode/*": "allow"
     },
     "external_directory_write": {
       "/tmp/*": "allow",

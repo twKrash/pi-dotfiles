@@ -207,7 +207,7 @@ cmp "$TMP/expected-skill.md" "$H/.pi/agent/skills/prompt-engineering/SKILL.md"
 # code-standards: one source, a skill per selected harness; instructions only point to it.
 {
   printf '%s\n' '---' 'name: code-standards' \
-    'description: Design, Python, testing and module-size standards. Use whenever writing, editing, reviewing, or refactoring Python or TypeScript code, including as a subagent.' '---' ''
+    'description: Design, Python, TypeScript, testing and module-size standards. Use whenever writing, editing, reviewing, or refactoring Python or TypeScript code, including as a subagent.' '---' ''
   cat "$ROOT/instructions/code-standards.md"
 } >"$TMP/expected-code-standards.md"
 cmp "$TMP/expected-code-standards.md" "$H/.pi/agent/skills/code-standards/SKILL.md"
