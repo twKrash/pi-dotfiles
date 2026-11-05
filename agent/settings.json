@@ -8,7 +8,7 @@
     "git:github.com/obra/superpowers",
     "npm:@andrewjacop/pi-herdr",
     "npm:@yofriadi/pi-toon",
-    "npm:context-mode",
+    "npm:context-mode@next",
     "git:github.com/DietrichGebert/ponytail",
     "npm:@narumitw/pi-goal",
     "npm:@juicesharp/rpiv-todo",
