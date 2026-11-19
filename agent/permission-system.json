@@ -1,6 +1,9 @@
 {
   "debugLog": true,
   "permissionReviewLog": true,
+  "commandEffects": {
+    "node": { "effects": "read", "unlessOption": ["-e", "--eval", "-p", "--print"] }
+  },
   "permission": {
     "*": "allow",
     "path": {
