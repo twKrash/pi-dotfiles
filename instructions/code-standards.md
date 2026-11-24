@@ -157,6 +157,14 @@ Run them through `code-gates`:
   `--coverage-command` when the default coverage run does not work for the repository.
   mutator runs only on the staged lines that differ from `HEAD`; `--mutate-all`
   runs every line of the staged files. Use `--no-mutator` only when you tell the user why.
+- A run can take longer than the agent's tool timeout (mutator over a large
+  suite can take 30 minutes or more). Start it in the background and poll its log
+  with short `sleep` calls:
+  `timeout 3000 /absolute/path/to/command … > <log> 2>&1 &`.
+  Name the command by its absolute path and don't use `nohup`: the permission
+  system treats `nohup`, and any wrapped command starting with `~` or `$HOME`, as
+  hiding what runs, and asks the user. Don't edit files while mutator runs: it
+  mutates the working tree in place.
 - A surviving mutant the user agrees to defer (`needs-test`) or that no test can
   kill (`equivalent`) is recorded with
   `code-gates accept <file>:<line> <needs-test|equivalent> [note]`, kept per
