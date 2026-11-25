@@ -16,12 +16,13 @@
     "npm:pi-rtk-optimizer",
     "npm:pi-tool-stats",
     "npm:@twkrash/pi-session-inspector",
+    "npm:@twkrash/pi-headroom",
     "npm:pi-jev",
     "npm:pi-open-tui",
     "npm:pi-subagents"
   ],
   "subagents": {
-    "defaultSubagentOnlyExtensions": ["~/.pi/agent/extensions/code-standards-guard.js", "~/.pi/agent/extensions/code-gates.js"],
+    "defaultSubagentOnlyExtensions": ["~/.pi/agent/extensions/code-standards-guard.js", "~/.pi/agent/extensions/code-gates.js", "~/.pi/agent/npm/node_modules/@twkrash/pi-headroom/src/index.ts"],
     "agentOverrides": {
       "delegate": { "thinking": "low" },
       "scout": {
