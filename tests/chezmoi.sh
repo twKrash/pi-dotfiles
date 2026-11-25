@@ -257,6 +257,7 @@ const roles = s.subagents.agentOverrides;
 if (s.userSetting !== 'keep') throw new Error('settings overwritten');
 if (!s.packages.includes('npm:custom-package')) throw new Error('custom package removed');
 if (!s.packages.includes('npm:@twkrash/pi-session-inspector')) throw new Error('repo package missing');
+if (!s.packages.includes('npm:@twkrash/pi-headroom')) throw new Error('headroom package missing');
 if (s.packages.includes('git:github.com/nicobailon/pi-subagents')) throw new Error('legacy pi-subagents Git package retained');
 if (s.packages.filter((pkg) => pkg === 'npm:pi-subagents').length !== 1) throw new Error('npm pi-subagents package missing or duplicated');
 if (!s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK package missing');
@@ -268,7 +269,7 @@ if (JSON.stringify(roles.worker.tools) !== JSON.stringify(['read', 'edit', 'writ
 // The code-standards guard reaches subagents: its skill and extension join local lists.
 if (JSON.stringify(roles.worker.skills) !== JSON.stringify(['local-skill', 'graphify', 'ponytail', 'code-standards'])) throw new Error('worker skills not extended');
 if (!roles.reviewer.skills.includes('code-standards')) throw new Error('reviewer code-standards skill missing');
-if (JSON.stringify(s.subagents.defaultSubagentOnlyExtensions) !== JSON.stringify(['/local/ext.js', '~/.pi/agent/extensions/code-standards-guard.js', '~/.pi/agent/extensions/code-gates.js'])) throw new Error('guard and code-gates extensions not added');
+if (JSON.stringify(s.subagents.defaultSubagentOnlyExtensions) !== JSON.stringify(['/local/ext.js', '~/.pi/agent/extensions/code-standards-guard.js', '~/.pi/agent/extensions/code-gates.js', '~/.pi/agent/npm/node_modules/@twkrash/pi-headroom/src/index.ts'])) throw new Error('guard, code-gates and headroom extensions not added');
 if (!m.mcpServers.local) throw new Error('unrelated MCP server removed');
 if (!m.mcpServers.context7?.url) throw new Error('Context7 missing');
 NODE
