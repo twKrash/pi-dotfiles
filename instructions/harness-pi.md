@@ -14,6 +14,10 @@ Install the Graphify skill with `graphify install --platform pi` and invoke it a
 
 Use `pi-subagents` for delegated agent work. These Pi rules apply to all configured Pi model profiles, including the Claude-backed profile. Do not use Herdr agent spawns for implementation, review, or other delegation unless the user explicitly requests Herdr or `pi-subagents` is unavailable.
 
+For subagent-driven development, superpowers writes the spec and the plan (brainstorming, writing-plans). When the main model is not Opus, do not write them in the main session: the first child is an `oracle` that writes both with those skills. Then implement the plan task by task: `scout` for the recon a task needs, `worker` to implement each task from a self-contained brief, and a fresh `kapisch-reviewer` to review each task before the next one starts. Ask `oracle` for design questions and drift checks against the plan. Do not use superpowers' own implementer and reviewer prompts for these roles.
+
+Do not pass `model` (or a thinking suffix) to `subagent`: each role's model and thinking come from `subagents.agentOverrides`. A per-call model overrides them, for example a Sonnet `kapisch-reviewer` instead of Opus, or a provider outside `claude-bridge`.
+
 Delegated agents must not run commands the Pi permission config marks `ask` (by default `rm -rf`, `sudo`, `git push`, `git reset --hard` and `git clean`): native subagent permission asks are forwarded to the parent session's UI, where an unanswered prompt stalls the child. Deleting files the task itself requires is allowed with `git rm` or a non-recursive `rm`; temporary-file cleanup is left to the main process, which runs it only after user approval.
 
 ## Worktrees

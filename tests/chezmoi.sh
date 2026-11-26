@@ -262,7 +262,8 @@ if (s.packages.includes('git:github.com/nicobailon/pi-subagents')) throw new Err
 if (s.packages.filter((pkg) => pkg === 'npm:pi-subagents').length !== 1) throw new Error('npm pi-subagents package missing or duplicated');
 if (!s.packages.includes('npm:pi-claude-agent-sdk')) throw new Error('Claude SDK package missing');
 if (s.defaultProvider !== 'keep-provider' || s.defaultModel !== 'keep-model') throw new Error('main model defaults changed');
-if (roles.scout.model !== 'claude-bridge/claude-haiku-4-5' || roles.scout.thinking !== 'low') throw new Error('Claude scout profile missing');
+if (roles.scout.model !== 'claude-bridge/claude-haiku-5-5' || roles.scout.thinking !== 'low') throw new Error('Claude scout profile missing');
+if (roles['kapisch-reviewer']?.model !== 'claude-bridge/claude-opus-5-5' || roles['kapisch-reviewer'].thinking !== 'high') throw new Error('Claude kapisch-reviewer profile missing');
 if (roles.oracle.model !== 'claude-bridge/claude-opus-5-5' || roles.oracle.thinking !== 'high') throw new Error('Claude oracle profile missing');
 if (JSON.stringify(roles.scout.tools) !== JSON.stringify(['read', 'grep'])) throw new Error('scout tools changed');
 if (JSON.stringify(roles.worker.tools) !== JSON.stringify(['read', 'edit', 'write'])) throw new Error('worker tools changed');

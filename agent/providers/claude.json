@@ -9,7 +9,7 @@
         "thinking": "low"
       },
       "scout": {
-        "model": "claude-bridge/claude-haiku-4-5",
+        "model": "claude-bridge/claude-haiku-5-5",
         "thinking": "low"
       },
       "worker": {
@@ -21,6 +21,10 @@
         "thinking": "medium"
       },
       "oracle": {
+        "model": "claude-bridge/claude-opus-5-5",
+        "thinking": "high"
+      },
+      "kapisch-reviewer": {
         "model": "claude-bridge/claude-opus-5-5",
         "thinking": "high"
       }

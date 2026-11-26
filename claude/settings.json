@@ -8,9 +8,13 @@
     "typescript-lsp@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
-    "hookify@claude-plugins-official": true,
-    "commit-commands@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true
+    "hookify@claude-plugins-official": false,
+    "commit-commands@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": false,
+    "entrix-core@claudeai-entrixenergy-agent-skills": false,
+    "entrix-engineering@claudeai-entrixenergy-agent-skills": false,
+    "skill-creator@anthropic-plugin-directory": false,
+    "superpowers@claude-plugins-official": false
   },
   "extraKnownMarketplaces": {
     "ponytail": {

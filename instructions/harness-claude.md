@@ -12,6 +12,12 @@ This section only specializes the instructions above for Claude Code.
 
 Use Claude Code subagents for delegated work. A fresh subagent does not see the conversation, so give it the self-contained brief described above.
 
+When the main model is Sonnet or Haiku, write specs and plans in an Opus subagent (Agent tool, `model: opus`, using superpowers brainstorming and writing-plans); the main session orchestrates.
+
+## Tool orchestration (Claude Code)
+
+Orchestrate tool calls through context-mode: `ctx_batch_execute` for two or more independent gathering steps, `ctx_execute` for chained steps and for filtering large output, so raw output stays in the sandbox and only the result returns. Use tools directly for a single short call and for file edits.
+
 ## Skills
 
 When the user types `/<name>` for an installed skill, run that skill before anything else. Invoke the Graphify skill as `/graphify`.
