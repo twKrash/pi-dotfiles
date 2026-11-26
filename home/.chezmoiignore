@@ -7,6 +7,7 @@ ai/**
 {{- end }}
 {{- if not (has "claude" .harnesses) }}
 .claude/**
+.config/zsh/functions/headroom-claude.zsh
 {{- end }}
 {{- if not (has "codex" .harnesses) }}
 .codex/**

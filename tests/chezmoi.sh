@@ -316,6 +316,8 @@ grep -qx context7 "$STUB_ADDED"
 if grep -qx github "$STUB_ADDED"; then exit 1; fi
 test -x "$H/.claude/statusline.sh"
 cmp "$ROOT/home/dot_claude/executable_statusline.sh" "$H/.claude/statusline.sh"
+# The Headroom wrapper for claude ships with the claude harness only.
+cmp "$ROOT/home/dot_config/zsh/functions/headroom-claude.zsh" "$H/.config/zsh/functions/headroom-claude.zsh"
 test -z "$(cz hybrid diff)"
 # MEMORY.md and the cache manifest are created once and never overwritten; ai-mem is installed.
 cmp "$ROOT/home/dot_config/private_ai-memory/create_structure.json" "$H/.config/ai-memory/structure.json"
@@ -384,6 +386,7 @@ if grep -q 'pi-subagents\|codemode' "$C/.codex/AGENTS.md"; then exit 1; fi
 grep -Fq 'load the `code-standards` skill' "$C/.codex/AGENTS.md"
 cmp "$TMP/expected-code-standards.md" "$C/.codex/skills/code-standards/SKILL.md"
 test ! -e "$C/.claude"
+test ! -e "$C/.config/zsh/functions/headroom-claude.zsh"
 node - "$C/.pi/agent/settings.json" <<'NODE'
 const s = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
 const roles = s.subagents.agentOverrides;
